@@ -29,7 +29,7 @@ struct GraphTabView: View {
                 }
                 Divider()
                 List(selection: $selectedType) {
-                    ForEach(measurementTypes, id: \.self) { type in
+                    ForEach(measurementTypes, id: \..self) { type in
                         HStack {
                             if let colorHex = type.color {
                                 Circle()
@@ -38,8 +38,19 @@ struct GraphTabView: View {
                             }
                             Text(type.name ?? "")
                             Spacer()
-                            Text(type.unit ?? "")
-                                .foregroundColor(.secondary)
+                            if type.unit == "Picture" {
+                                Image(systemName: "photo")
+                                    .foregroundColor(.secondary)
+                            } else {
+                                if let entries = type.entries as? Set<MeasurementEntry>,
+                                   let latest = entries.sorted(by: { ($0.timestamp ?? Date.distantPast) > ($1.timestamp ?? Date.distantPast) }).first {
+                                    Text("\(latest.value.clean) \(type.unit ?? "")")
+                                        .foregroundColor(.secondary)
+                                } else {
+                                    Text(type.unit ?? "")
+                                        .foregroundColor(.secondary)
+                                }
+                            }
                         }
                         .contentShape(Rectangle())
                         .onTapGesture { selectedType = type }
@@ -67,6 +78,7 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
         chartView.highlightPerTapEnabled = true
         chartView.dragEnabled = true
         chartView.animate(xAxisDuration: 0.5)
+        chartView.scaleYEnabled = false
         return chartView
     }
     
@@ -181,5 +193,11 @@ struct ImagePreviewView: View, Identifiable {
                     .padding()
             }
         }
+    }
+}
+
+extension Double {
+    var clean: String {
+        return truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", self) : String(self)
     }
 } 

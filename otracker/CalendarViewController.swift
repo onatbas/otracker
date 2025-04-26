@@ -176,4 +176,13 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
         }
         return cell
     }
+    
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        let entry = selectedMeasurements[indexPath.row]
+        if let type = entry.type, type.unit == "Picture", let imageData = entry.image, let image = UIImage(data: imageData) {
+            let previewVC = ImagePreviewViewController(image: image)
+            present(previewVC, animated: true)
+        }
+        tableView.deselectRow(at: indexPath, animated: true)
+    }
 } 

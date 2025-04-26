@@ -626,15 +626,24 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
             formatter.dateStyle = .medium
             formatter.timeStyle = .short
             if measurementType.unit == "Picture", let imageData = entry.image, let image = UIImage(data: imageData) {
-                // Resize image to thumbnail (44x44)
-                let thumbnailSize = CGSize(width: 44, height: 44)
-                let renderer = UIGraphicsImageRenderer(size: thumbnailSize)
+                // Resize image to thumbnail (fit within 44x44, preserve aspect ratio)
+                let maxThumbnailSize: CGFloat = 44
+                let aspectRatio = image.size.width / image.size.height
+                var targetSize = CGSize(width: maxThumbnailSize, height: maxThumbnailSize)
+                if aspectRatio > 1 {
+                    // Landscape
+                    targetSize.height = maxThumbnailSize / aspectRatio
+                } else {
+                    // Portrait or square
+                    targetSize.width = maxThumbnailSize * aspectRatio
+                }
+                let renderer = UIGraphicsImageRenderer(size: targetSize)
                 let thumbnail = renderer.image { _ in
-                    image.draw(in: CGRect(origin: .zero, size: thumbnailSize))
+                    image.draw(in: CGRect(origin: .zero, size: targetSize))
                 }
                 content.image = thumbnail
                 content.imageProperties.cornerRadius = 8
-                content.imageProperties.maximumSize = thumbnailSize
+                content.imageProperties.maximumSize = CGSize(width: maxThumbnailSize, height: maxThumbnailSize)
                 content.text = nil
                 content.secondaryText = formatter.string(from: entry.timestamp ?? Date())
                 cell.contentConfiguration = content
