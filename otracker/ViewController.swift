@@ -6,14 +6,615 @@
 //
 
 import UIKit
+import CoreData
 
-class ViewController: UIViewController {
-
+class MainTabBarController: UITabBarController {
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Do any additional setup after loading the view.
+        setupViewControllers()
     }
+    
+    private func setupViewControllers() {
+        let categoriesVC = CategoriesViewController()
+        categoriesVC.tabBarItem = UITabBarItem(title: "Categories", image: UIImage(systemName: "list.bullet"), tag: 0)
+        
+        let measurementsVC = MeasurementsViewController()
+        measurementsVC.tabBarItem = UITabBarItem(title: "Measurements", image: UIImage(systemName: "ruler"), tag: 1)
+        
+        viewControllers = [categoriesVC, measurementsVC]
+    }
+}
 
+class AddCategoryViewController: UIViewController {
+    private let nameTextField = UITextField()
+    private let unitTextField = UITextField()
+    private let unitOptions = ["cm", "ft", "kg", "lb", "%", "in", "min", "#", "Custom"]
+    private var unitButtons: [UIButton] = []
+    private var selectedUnit: String = "cm"
+    private let saveButton = UIButton(type: .system)
+    private let colorOptions: [UIColor] = [
+        UIColor(red: 0.91, green: 0.30, blue: 0.32, alpha: 1.0), // red
+        UIColor(red: 0.96, green: 0.47, blue: 0.23, alpha: 1.0), // orange
+        UIColor(red: 0.48, green: 0.76, blue: 0.35, alpha: 1.0), // green
+        UIColor(red: 0.27, green: 0.60, blue: 0.78, alpha: 1.0), // blue
+        UIColor(red: 0.41, green: 0.35, blue: 0.80, alpha: 1.0), // purple
+        UIColor(red: 0.99, green: 0.76, blue: 0.18, alpha: 1.0), // yellow
+        UIColor(red: 0.20, green: 0.68, blue: 0.47, alpha: 1.0), // teal
+        UIColor(red: 0.93, green: 0.51, blue: 0.47, alpha: 1.0), // coral
+        UIColor(red: 0.60, green: 0.60, blue: 0.60, alpha: 1.0), // gray
+        UIColor(red: 0.13, green: 0.59, blue: 0.95, alpha: 1.0)  // light blue
+    ]
+    private var colorButtons: [UIButton] = []
+    private var selectedColor: UIColor
+    private let completion: (String, String, UIColor) -> Void
+    
+    init(completion: @escaping (String, String, UIColor) -> Void) {
+        self.completion = completion
+        self.selectedColor = UIColor(red: 0.91, green: 0.30, blue: 0.32, alpha: 1.0) // default to first color
+        super.init(nibName: nil, bundle: nil)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupUI()
+    }
+    
+    private func setupUI() {
+        view.backgroundColor = .systemBackground
+        title = "Add Category"
+        
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .close,
+            target: self,
+            action: #selector(closeTapped)
+        )
+        
+        nameTextField.placeholder = "Name (e.g., Neck)"
+        nameTextField.borderStyle = .roundedRect
+        nameTextField.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Unit grid
+        let unitGridStack = UIStackView()
+        unitGridStack.axis = .vertical
+        unitGridStack.spacing = 12
+        unitGridStack.translatesAutoresizingMaskIntoConstraints = false
+        let unitsPerRow = 4
+        unitButtons = []
+        for row in 0..<(unitOptions.count / unitsPerRow + (unitOptions.count % unitsPerRow == 0 ? 0 : 1)) {
+            let rowStack = UIStackView()
+            rowStack.axis = .horizontal
+            rowStack.spacing = 12
+            rowStack.distribution = .equalSpacing
+            for col in 0..<unitsPerRow {
+                let idx = row * unitsPerRow + col
+                if idx < unitOptions.count {
+                    let unit = unitOptions[idx]
+                    let button = UIButton(type: .system)
+                    button.setTitle(unit, for: .normal)
+                    button.setTitleColor(.label, for: .normal)
+                    button.backgroundColor = .systemGray6
+                    button.layer.cornerRadius = 8
+                    button.layer.borderWidth = (unit == selectedUnit) ? 2 : 0
+                    button.layer.borderColor = (unit == selectedUnit) ? UIColor.systemBlue.cgColor : UIColor.clear.cgColor
+                    button.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
+                    button.translatesAutoresizingMaskIntoConstraints = false
+                    button.widthAnchor.constraint(equalToConstant: 60).isActive = true
+                    button.heightAnchor.constraint(equalToConstant: 36).isActive = true
+                    button.tag = idx
+                    button.addTarget(self, action: #selector(unitSelected(_:)), for: .touchUpInside)
+                    unitButtons.append(button)
+                    rowStack.addArrangedSubview(button)
+                }
+            }
+            unitGridStack.addArrangedSubview(rowStack)
+        }
+        // Custom unit text field
+        unitTextField.placeholder = "Custom unit"
+        unitTextField.borderStyle = .roundedRect
+        unitTextField.translatesAutoresizingMaskIntoConstraints = false
+        unitTextField.isHidden = true
+        
+        // Color grid
+        let colorGridStack = UIStackView()
+        colorGridStack.axis = .vertical
+        colorGridStack.spacing = 16
+        colorGridStack.translatesAutoresizingMaskIntoConstraints = false
+        
+        let colorsPerRow = 5
+        colorButtons = []
+        for row in 0..<(colorOptions.count / colorsPerRow + (colorOptions.count % colorsPerRow == 0 ? 0 : 1)) {
+            let rowStack = UIStackView()
+            rowStack.axis = .horizontal
+            rowStack.spacing = 24
+            rowStack.distribution = .equalSpacing
+            for col in 0..<colorsPerRow {
+                let idx = row * colorsPerRow + col
+                if idx < colorOptions.count {
+                    let color = colorOptions[idx]
+                    let button = UIButton(type: .system)
+                    button.backgroundColor = color
+                    button.layer.cornerRadius = 24
+                    button.layer.masksToBounds = true
+                    button.translatesAutoresizingMaskIntoConstraints = false
+                    button.widthAnchor.constraint(equalToConstant: 48).isActive = true
+                    button.heightAnchor.constraint(equalToConstant: 48).isActive = true
+                    button.tag = idx
+                    button.addTarget(self, action: #selector(colorSelected(_:)), for: .touchUpInside)
+                    if color == selectedColor {
+                        button.layer.borderWidth = 4
+                        button.layer.borderColor = UIColor.systemBlue.cgColor
+                    } else {
+                        button.layer.borderWidth = 0
+                    }
+                    colorButtons.append(button)
+                    rowStack.addArrangedSubview(button)
+                }
+            }
+            colorGridStack.addArrangedSubview(rowStack)
+        }
+        
+        saveButton.setTitle("Save", for: .normal)
+        saveButton.backgroundColor = .systemBlue
+        saveButton.setTitleColor(.white, for: .normal)
+        saveButton.layer.cornerRadius = 8
+        saveButton.addTarget(self, action: #selector(saveButtonTapped), for: .touchUpInside)
+        saveButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        view.addSubview(nameTextField)
+        view.addSubview(unitGridStack)
+        view.addSubview(unitTextField)
+        view.addSubview(colorGridStack)
+        view.addSubview(saveButton)
+        
+        NSLayoutConstraint.activate([
+            nameTextField.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+            nameTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            nameTextField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            nameTextField.heightAnchor.constraint(equalToConstant: 44),
+            
+            unitGridStack.topAnchor.constraint(equalTo: nameTextField.bottomAnchor, constant: 20),
+            unitGridStack.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            unitGridStack.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
+            unitTextField.topAnchor.constraint(equalTo: unitGridStack.bottomAnchor, constant: 8),
+            unitTextField.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            unitTextField.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
+            unitTextField.heightAnchor.constraint(equalToConstant: 44),
+            
+            colorGridStack.topAnchor.constraint(equalTo: unitTextField.bottomAnchor, constant: 24),
+            colorGridStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            
+            saveButton.topAnchor.constraint(equalTo: colorGridStack.bottomAnchor, constant: 32),
+            saveButton.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            saveButton.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
+            saveButton.heightAnchor.constraint(equalToConstant: 44)
+        ])
+    }
+    
+    @objc private func unitSelected(_ sender: UIButton) {
+        let idx = sender.tag
+        selectedUnit = unitOptions[idx]
+        for (i, button) in unitButtons.enumerated() {
+            if i == idx {
+                button.layer.borderWidth = 2
+                button.layer.borderColor = UIColor.systemBlue.cgColor
+            } else {
+                button.layer.borderWidth = 0
+            }
+        }
+        if selectedUnit == "Custom" {
+            unitTextField.isHidden = false
+        } else {
+            unitTextField.isHidden = true
+        }
+    }
+    
+    @objc private func colorSelected(_ sender: UIButton) {
+        let idx = sender.tag
+        selectedColor = colorOptions[idx]
+        for (i, button) in colorButtons.enumerated() {
+            if i == idx {
+                button.layer.borderWidth = 4
+                button.layer.borderColor = UIColor.systemBlue.cgColor
+            } else {
+                button.layer.borderWidth = 0
+            }
+        }
+    }
+    
+    @objc private func saveButtonTapped() {
+        guard let name = nameTextField.text, !name.isEmpty else {
+            return
+        }
+        let unit: String
+        if selectedUnit == "Custom" {
+            guard let customUnit = unitTextField.text, !customUnit.isEmpty else { return }
+            unit = customUnit
+        } else {
+            unit = selectedUnit
+        }
+        completion(name, unit, selectedColor)
+        dismiss(animated: true)
+    }
+    
+    @objc private func closeTapped() {
+        dismiss(animated: true)
+    }
+}
 
+class CategoriesViewController: UIViewController {
+    private let tableView = UITableView()
+    private let addButton = UIButton(type: .system)
+    private var measurementTypes: [MeasurementType] = []
+    private let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupUI()
+        loadMeasurementTypes()
+    }
+    
+    private func setupUI() {
+        view.backgroundColor = .systemBackground
+        title = "Categories"
+        
+        // Configure table view
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.delegate = self
+        tableView.dataSource = self
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "Cell")
+        view.addSubview(tableView)
+        
+        // Configure add button
+        addButton.translatesAutoresizingMaskIntoConstraints = false
+        addButton.setTitle("Add Category", for: .normal)
+        addButton.addTarget(self, action: #selector(addCategory), for: .touchUpInside)
+        view.addSubview(addButton)
+        
+        // Set up constraints
+        NSLayoutConstraint.activate([
+            tableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tableView.bottomAnchor.constraint(equalTo: addButton.topAnchor),
+            
+            addButton.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            addButton.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            addButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            addButton.heightAnchor.constraint(equalToConstant: 50)
+        ])
+    }
+    
+    private func loadMeasurementTypes() {
+        let request: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+        do {
+            measurementTypes = try context.fetch(request)
+            tableView.reloadData()
+        } catch {
+            print("Error loading measurement types: \(error)")
+        }
+    }
+    
+    @objc private func addCategory() {
+        let addCategoryVC = AddCategoryViewController { [weak self] name, unit, color in
+            let measurementType = MeasurementType(context: self!.context)
+            measurementType.name = name
+            measurementType.unit = unit
+            measurementType.color = color.toHex()
+            
+            do {
+                try self?.context.save()
+                self?.loadMeasurementTypes()
+            } catch {
+                print("Error saving measurement type: \(error)")
+            }
+        }
+        
+        let nav = UINavigationController(rootViewController: addCategoryVC)
+        nav.modalPresentationStyle = .fullScreen
+        present(nav, animated: true)
+    }
+}
+
+extension CategoriesViewController: UITableViewDelegate, UITableViewDataSource {
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return measurementTypes.count
+    }
+    
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath)
+        let measurementType = measurementTypes[indexPath.row]
+        
+        var content = cell.defaultContentConfiguration()
+        content.text = measurementType.name
+        content.secondaryText = "Unit: \(measurementType.unit ?? "")"
+        if let colorHex = measurementType.color {
+            let color = UIColor(hex: colorHex)
+            content.image = UIImage(systemName: "circle.fill")?.withTintColor(color, renderingMode: .alwaysOriginal)
+        }
+        cell.contentConfiguration = content
+        
+        return cell
+    }
+    
+    func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
+        if editingStyle == .delete {
+            let measurementType = measurementTypes[indexPath.row]
+            
+            // Delete all associated measurements first
+            if let entries = measurementType.entries?.allObjects as? [MeasurementEntry] {
+                for entry in entries {
+                    context.delete(entry)
+                }
+            }
+            
+            // Then delete the measurement type
+            context.delete(measurementType)
+            
+            do {
+                try context.save()
+                measurementTypes.remove(at: indexPath.row)
+                tableView.deleteRows(at: [indexPath], with: .automatic)
+            } catch {
+                print("Error deleting measurement type: \(error)")
+            }
+        }
+    }
+    
+    func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
+        return true
+    }
+}
+
+class MeasurementsViewController: UIViewController {
+    private let tableView = UITableView()
+    private var measurementTypes: [MeasurementType] = []
+    private let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
+    private var expandedSections: Set<Int> = []
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupUI()
+        loadMeasurementTypes()
+    }
+    
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        loadMeasurementTypes()
+    }
+    
+    private func setupUI() {
+        view.backgroundColor = .systemBackground
+        title = "Measurements"
+        
+        // Configure table view
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.delegate = self
+        tableView.dataSource = self
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "Cell")
+        view.addSubview(tableView)
+        
+        // Set up constraints
+        NSLayoutConstraint.activate([
+            tableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tableView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
+        ])
+    }
+    
+    private func loadMeasurementTypes() {
+        let request: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+        do {
+            measurementTypes = try context.fetch(request)
+            tableView.reloadData()
+        } catch {
+            print("Error loading measurement types: \(error)")
+        }
+    }
+    
+    private func addMeasurement(for type: MeasurementType) {
+        let alert = UIAlertController(title: "Add Measurement", message: "Enter value for \(type.name ?? "")", preferredStyle: .alert)
+        
+        alert.addTextField { textField in
+            textField.placeholder = "Value in \(type.unit ?? "")"
+            textField.keyboardType = .decimalPad
+        }
+        
+        let addAction = UIAlertAction(title: "Add", style: .default) { [weak self] _ in
+            guard let valueText = alert.textFields?[0].text,
+                  let value = Double(valueText) else { return }
+            
+            let entry = MeasurementEntry(context: self!.context)
+            entry.value = value
+            entry.timestamp = Date()
+            entry.type = type
+            
+            do {
+                try self?.context.save()
+                self?.tableView.reloadData()
+            } catch {
+                print("Error saving measurement entry: \(error)")
+            }
+        }
+        
+        let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
+        
+        alert.addAction(addAction)
+        alert.addAction(cancelAction)
+        
+        present(alert, animated: true)
+    }
+    
+    private func toggleSection(_ section: Int) {
+        if expandedSections.contains(section) {
+            expandedSections.remove(section)
+        } else {
+            expandedSections.insert(section)
+        }
+        tableView.reloadSections(IndexSet(integer: section), with: .automatic)
+    }
+}
+
+extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource {
+    func numberOfSections(in tableView: UITableView) -> Int {
+        return measurementTypes.count
+    }
+    
+    func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        return measurementTypes[section].name
+    }
+    
+    func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
+        let headerView = UIView()
+        headerView.backgroundColor = .systemBackground
+        headerView.tag = section
+        
+        let titleLabel = UILabel()
+        titleLabel.text = measurementTypes[section].name
+        titleLabel.font = .boldSystemFont(ofSize: 16)
+        if let colorHex = measurementTypes[section].color {
+            titleLabel.textColor = UIColor(hex: colorHex)
+        }
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        let addButton = UIButton(type: .system)
+        addButton.setImage(UIImage(systemName: "plus.circle.fill"), for: .normal)
+        if let colorHex = measurementTypes[section].color {
+            addButton.tintColor = UIColor(hex: colorHex)
+        }
+        addButton.tag = section
+        addButton.addTarget(self, action: #selector(addButtonTapped(_:)), for: .touchUpInside)
+        addButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        let chevronImage = UIImage(systemName: expandedSections.contains(section) ? "chevron.down" : "chevron.right")
+        let chevronButton = UIButton(type: .system)
+        chevronButton.setImage(chevronImage, for: .normal)
+        chevronButton.tintColor = .systemGray
+        chevronButton.tag = section
+        chevronButton.addTarget(self, action: #selector(headerTapped(_:)), for: .touchUpInside)
+        chevronButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        headerView.addSubview(titleLabel)
+        headerView.addSubview(addButton)
+        headerView.addSubview(chevronButton)
+        
+        NSLayoutConstraint.activate([
+            chevronButton.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 16),
+            chevronButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            chevronButton.widthAnchor.constraint(equalToConstant: 24),
+            chevronButton.heightAnchor.constraint(equalToConstant: 24),
+            
+            titleLabel.leadingAnchor.constraint(equalTo: chevronButton.trailingAnchor, constant: 8),
+            titleLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            
+            addButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -16),
+            addButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            
+            headerView.heightAnchor.constraint(equalToConstant: 44)
+        ])
+        
+        // Make the entire header tappable
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(headerTapped(_:)))
+        headerView.addGestureRecognizer(tapGesture)
+        
+        return headerView
+    }
+    
+    @objc private func addButtonTapped(_ sender: UIButton) {
+        let measurementType = measurementTypes[sender.tag]
+        addMeasurement(for: measurementType)
+    }
+    
+    @objc private func headerTapped(_ sender: Any) {
+        let section: Int
+        if let button = sender as? UIButton {
+            section = button.tag
+        } else if let gesture = sender as? UITapGestureRecognizer,
+                  let headerView = gesture.view {
+            section = headerView.tag
+        } else {
+            return
+        }
+        toggleSection(section)
+    }
+    
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return expandedSections.contains(section) ? (measurementTypes[section].entries?.count ?? 0) : 0
+    }
+    
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath)
+        let measurementType = measurementTypes[indexPath.section]
+        
+        if let entry = measurementType.entries?.allObjects[indexPath.row] as? MeasurementEntry {
+            var content = cell.defaultContentConfiguration()
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .short
+            content.text = "\(entry.value) \(measurementType.unit ?? "")"
+            content.secondaryText = formatter.string(from: entry.timestamp ?? Date())
+            if let colorHex = measurementType.color {
+                content.textProperties.color = UIColor(hex: colorHex)
+            }
+            cell.contentConfiguration = content
+        }
+        
+        return cell
+    }
+    
+    func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
+        if editingStyle == .delete {
+            let measurementType = measurementTypes[indexPath.section]
+            if let entry = measurementType.entries?.allObjects[indexPath.row] as? MeasurementEntry {
+                context.delete(entry)
+                
+                do {
+                    try context.save()
+                    tableView.deleteRows(at: [indexPath], with: .automatic)
+                } catch {
+                    print("Error deleting measurement entry: \(error)")
+                }
+            }
+        }
+    }
+    
+    func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
+        return true
+    }
+}
+
+// Helper extensions
+extension UIColor {
+    func toHex() -> String? {
+        guard let components = cgColor.components, components.count >= 3 else {
+            return nil
+        }
+        let r = Float(components[0])
+        let g = Float(components[1])
+        let b = Float(components[2])
+        return String(format: "#%02lX%02lX%02lX", lroundf(r * 255), lroundf(g * 255), lroundf(b * 255))
+    }
+    
+    convenience init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let a, r, g, b: UInt64
+        switch hex.count {
+        case 3: // RGB (12-bit)
+            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+        case 6: // RGB (24-bit)
+            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
+        case 8: // ARGB (32-bit)
+            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+        default:
+            (a, r, g, b) = (255, 0, 0, 0)
+        }
+        self.init(red: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: CGFloat(a) / 255)
+    }
 }
 
