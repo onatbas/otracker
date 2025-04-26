@@ -12,6 +12,47 @@ struct GraphTabView: View {
     
     @State private var selectedType: MeasurementType?
     
+    private func latestDisplayValue(for type: MeasurementType) -> String {
+        if type.unit == "Picture" {
+            return ""
+        } else if type.isFormula {
+            guard let dependencies = type.dependencies?.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }),
+                  let formula = type.formula,
+                  let context = type.managedObjectContext else {
+                return type.unit ?? ""
+            }
+            var dayToValues: [String: [String: Double]] = [:]
+            for depName in dependencies {
+                let fetch: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+                fetch.predicate = NSPredicate(format: "name == %@", depName)
+                if let depType = try? context.fetch(fetch).first, let entries = depType.entries as? Set<MeasurementEntry> {
+                    for entry in entries {
+                        if let date = entry.timestamp {
+                            let day = Calendar.current.startOfDay(for: date)
+                            let dayStr = ISO8601DateFormatter().string(from: day)
+                            dayToValues[dayStr, default: [:]][depName] = entry.value
+                        }
+                    }
+                }
+            }
+            let validDays = dayToValues.filter { $0.value.keys.count == dependencies.count }
+            if let (_, values) = validDays.sorted(by: { $0.key > $1.key }).first {
+                let expr = NSExpression(format: formula)
+                let result = expr.expressionValue(with: values, context: nil) as? Double ?? 0.0
+                return "\(result.clean) \(type.unit ?? "")"
+            } else {
+                return type.unit ?? ""
+            }
+        } else {
+            if let entries = type.entries as? Set<MeasurementEntry>,
+               let latest = entries.sorted(by: { ($0.timestamp ?? Date.distantPast) > ($1.timestamp ?? Date.distantPast) }).first {
+                return "\(latest.value.clean) \(type.unit ?? "")"
+            } else {
+                return type.unit ?? ""
+            }
+        }
+    }
+    
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
@@ -41,16 +82,9 @@ struct GraphTabView: View {
                             if type.unit == "Picture" {
                                 Image(systemName: "photo")
                                     .foregroundColor(.secondary)
-                            } else {
-                                if let entries = type.entries as? Set<MeasurementEntry>,
-                                   let latest = entries.sorted(by: { ($0.timestamp ?? Date.distantPast) > ($1.timestamp ?? Date.distantPast) }).first {
-                                    Text("\(latest.value.clean) \(type.unit ?? "")")
-                                        .foregroundColor(.secondary)
-                                } else {
-                                    Text(type.unit ?? "")
-                                        .foregroundColor(.secondary)
-                                }
                             }
+                            Text(latestDisplayValue(for: type))
+                                .foregroundColor(.secondary)
                         }
                         .contentShape(Rectangle())
                         .onTapGesture { selectedType = type }
@@ -83,38 +117,85 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: LineChartView, context: Context) {
-        let request: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
-        request.predicate = NSPredicate(format: "type == %@", type)
-        let entries: [MeasurementEntry]
-        do {
-            entries = try self.context.fetch(request)
-        } catch {
-            uiView.data = nil
-            return
-        }
-        let sorted = entries.sorted { ($0.timestamp ?? Date()) < ($1.timestamp ?? Date()) }
-        let chartEntries = sorted.enumerated().map { (idx, entry) -> ChartDataEntry in
-            ChartDataEntry(x: Double(idx), y: entry.value)
-        }
-        let dataSet = LineChartDataSet(entries: chartEntries, label: type.name ?? "")
-        dataSet.colors = [NSUIColor.systemBlue]
-        dataSet.circleColors = [NSUIColor.systemBlue]
-        dataSet.circleRadius = 4
-        dataSet.drawValuesEnabled = false
-        dataSet.lineWidth = 2
-        dataSet.mode = LineChartDataSet.Mode.cubicBezier
-        let data = LineChartData(dataSet: dataSet)
-        uiView.data = data
-        uiView.xAxis.valueFormatter = IndexAxisValueFormatter(values: sorted.compactMap { entry in
-            if let date = entry.timestamp {
-                let formatter = DateFormatter()
-                formatter.dateStyle = .short
-                return formatter.string(from: date)
+        if type.isFormula, let dependencies = type.dependencies?.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }), let formula = type.formula, let moc = type.managedObjectContext {
+            // Gather all entries for dependencies
+            var dayToValues: [String: [String: Double]] = [:]
+            var dayToDate: [String: Date] = [:]
+            for depName in dependencies {
+                let fetch: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+                fetch.predicate = NSPredicate(format: "name == %@", depName)
+                if let depType = try? moc.fetch(fetch).first, let entries = depType.entries as? Set<MeasurementEntry> {
+                    for entry in entries {
+                        if let date = entry.timestamp {
+                            let day = Calendar.current.startOfDay(for: date)
+                            let dayStr = ISO8601DateFormatter().string(from: day)
+                            dayToValues[dayStr, default: [:]][depName] = entry.value
+                            dayToDate[dayStr] = day
+                        }
+                    }
+                }
             }
-            return ""
-        })
-        uiView.xAxis.granularity = 1
-        uiView.notifyDataSetChanged()
+            let validDays = dayToValues.filter { $0.value.keys.count == dependencies.count }
+            let sortedDays = validDays.keys.sorted()
+            let chartEntries: [ChartDataEntry] = sortedDays.enumerated().map { (idx, dayStr) in
+                let values = validDays[dayStr]!
+                let expr = NSExpression(format: formula)
+                let result = expr.expressionValue(with: values, context: nil) as? Double ?? 0.0
+                return ChartDataEntry(x: Double(idx), y: result)
+            }
+            let dataSet = LineChartDataSet(entries: chartEntries, label: type.name ?? "")
+            dataSet.colors = [NSUIColor.systemBlue]
+            dataSet.circleColors = [NSUIColor.systemBlue]
+            dataSet.circleRadius = 4
+            dataSet.drawValuesEnabled = false
+            dataSet.lineWidth = 2
+            dataSet.mode = LineChartDataSet.Mode.cubicBezier
+            let data = LineChartData(dataSet: dataSet)
+            uiView.data = data
+            uiView.xAxis.valueFormatter = IndexAxisValueFormatter(values: sortedDays.compactMap { dayStr in
+                if let date = dayToDate[dayStr] {
+                    let formatter = DateFormatter()
+                    formatter.dateStyle = .short
+                    return formatter.string(from: date)
+                }
+                return ""
+            })
+            uiView.xAxis.granularity = 1
+            uiView.notifyDataSetChanged()
+        } else {
+            let request: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
+            request.predicate = NSPredicate(format: "type == %@", type)
+            let entries: [MeasurementEntry]
+            do {
+                entries = try self.context.fetch(request)
+            } catch {
+                uiView.data = nil
+                return
+            }
+            let sorted = entries.sorted { ($0.timestamp ?? Date()) < ($1.timestamp ?? Date()) }
+            let chartEntries = sorted.enumerated().map { (idx, entry) -> ChartDataEntry in
+                ChartDataEntry(x: Double(idx), y: entry.value)
+            }
+            let dataSet = LineChartDataSet(entries: chartEntries, label: type.name ?? "")
+            dataSet.colors = [NSUIColor.systemBlue]
+            dataSet.circleColors = [NSUIColor.systemBlue]
+            dataSet.circleRadius = 4
+            dataSet.drawValuesEnabled = false
+            dataSet.lineWidth = 2
+            dataSet.mode = LineChartDataSet.Mode.cubicBezier
+            let data = LineChartData(dataSet: dataSet)
+            uiView.data = data
+            uiView.xAxis.valueFormatter = IndexAxisValueFormatter(values: sorted.compactMap { entry in
+                if let date = entry.timestamp {
+                    let formatter = DateFormatter()
+                    formatter.dateStyle = .short
+                    return formatter.string(from: date)
+                }
+                return ""
+            })
+            uiView.xAxis.granularity = 1
+            uiView.notifyDataSetChanged()
+        }
     }
 }
 

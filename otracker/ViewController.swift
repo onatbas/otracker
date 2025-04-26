@@ -56,9 +56,16 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
     ]
     private var colorButtons: [UIButton] = []
     private var selectedColor: UIColor
-    private let completion: (String, String, UIColor) -> Void
+    private let completion: (String, String, UIColor, Bool, String?, String?) -> Void
+    private let formulaSwitch = UISwitch()
+    private let formulaLabel = UILabel()
+    private let formulaTextField = UITextField()
+    private let dependenciesTextField = UITextField()
+    private var isFormula: Bool = false
+    private var formula: String? = nil
+    private var dependencies: String? = nil
     
-    init(completion: @escaping (String, String, UIColor) -> Void) {
+    init(completion: @escaping (String, String, UIColor, Bool, String?, String?) -> Void) {
         self.completion = completion
         self.selectedColor = UIColor(red: 0.91, green: 0.30, blue: 0.32, alpha: 1.0) // default to first color
         super.init(nibName: nil, bundle: nil)
@@ -72,6 +79,9 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
         super.viewDidLoad()
         setupUI()
         nameTextField.delegate = self
+        unitTextField.delegate = self
+        formulaTextField.delegate = self
+        dependenciesTextField.delegate = self
     }
     
     private func setupUI() {
@@ -175,6 +185,20 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
             colorGridStack.addArrangedSubview(rowStack)
         }
         
+        formulaLabel.text = "Formula"
+        formulaLabel.font = .systemFont(ofSize: 18, weight: .medium)
+        formulaLabel.translatesAutoresizingMaskIntoConstraints = false
+        formulaSwitch.translatesAutoresizingMaskIntoConstraints = false
+        formulaSwitch.addTarget(self, action: #selector(formulaSwitchChanged), for: .valueChanged)
+        formulaTextField.placeholder = "Formula (e.g. DIAMETER*3.14*2)"
+        formulaTextField.borderStyle = .roundedRect
+        formulaTextField.translatesAutoresizingMaskIntoConstraints = false
+        formulaTextField.isHidden = true
+        dependenciesTextField.placeholder = "Dependencies (comma-separated, e.g. DIAMETER)"
+        dependenciesTextField.borderStyle = .roundedRect
+        dependenciesTextField.translatesAutoresizingMaskIntoConstraints = false
+        dependenciesTextField.isHidden = true
+        
         saveButton.setTitle("Save", for: .normal)
         saveButton.backgroundColor = .systemBlue
         saveButton.setTitleColor(.white, for: .normal)
@@ -186,6 +210,10 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
         view.addSubview(unitGridStack)
         view.addSubview(unitTextField)
         view.addSubview(colorGridStack)
+        view.addSubview(formulaLabel)
+        view.addSubview(formulaSwitch)
+        view.addSubview(formulaTextField)
+        view.addSubview(dependenciesTextField)
         view.addSubview(saveButton)
         
         NSLayoutConstraint.activate([
@@ -205,7 +233,20 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
             colorGridStack.topAnchor.constraint(equalTo: unitTextField.bottomAnchor, constant: 24),
             colorGridStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             
-            saveButton.topAnchor.constraint(equalTo: colorGridStack.bottomAnchor, constant: 32),
+            formulaLabel.topAnchor.constraint(equalTo: colorGridStack.bottomAnchor, constant: 24),
+            formulaLabel.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            formulaSwitch.centerYAnchor.constraint(equalTo: formulaLabel.centerYAnchor),
+            formulaSwitch.leadingAnchor.constraint(equalTo: formulaLabel.trailingAnchor, constant: 12),
+            formulaTextField.topAnchor.constraint(equalTo: formulaLabel.bottomAnchor, constant: 12),
+            formulaTextField.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            formulaTextField.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
+            formulaTextField.heightAnchor.constraint(equalToConstant: 44),
+            dependenciesTextField.topAnchor.constraint(equalTo: formulaTextField.bottomAnchor, constant: 8),
+            dependenciesTextField.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            dependenciesTextField.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
+            dependenciesTextField.heightAnchor.constraint(equalToConstant: 44),
+            
+            saveButton.topAnchor.constraint(equalTo: dependenciesTextField.bottomAnchor, constant: 32),
             saveButton.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
             saveButton.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
             saveButton.heightAnchor.constraint(equalToConstant: 44)
@@ -243,6 +284,12 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
         }
     }
     
+    @objc private func formulaSwitchChanged() {
+        isFormula = formulaSwitch.isOn
+        formulaTextField.isHidden = !isFormula
+        dependenciesTextField.isHidden = !isFormula
+    }
+    
     @objc private func saveButtonTapped() {
         guard let name = nameTextField.text, !name.isEmpty else {
             return
@@ -254,7 +301,10 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
         } else {
             unit = selectedUnit
         }
-        completion(name, unit, selectedColor)
+        let isFormulaType = formulaSwitch.isOn
+        let formulaStr = isFormulaType ? formulaTextField.text : nil
+        let dependenciesStr = isFormulaType ? dependenciesTextField.text : nil
+        completion(name, unit, selectedColor, isFormulaType, formulaStr, dependenciesStr)
         dismiss(animated: true)
     }
     
@@ -263,11 +313,8 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
     }
     
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-        if textField == nameTextField {
-            saveButtonTapped()
-            return false
-        }
-        return true
+        textField.resignFirstResponder()
+        return false
     }
 }
 
@@ -325,12 +372,14 @@ class CategoriesViewController: UIViewController {
     }
     
     @objc private func addCategory() {
-        let addCategoryVC = AddCategoryViewController { [weak self] name, unit, color in
+        let addCategoryVC = AddCategoryViewController { [weak self] name, unit, color, isFormula, formula, dependencies in
             let measurementType = MeasurementType(context: self!.context)
             measurementType.name = name
             measurementType.unit = unit
             measurementType.color = color.toHex()
-            
+            measurementType.isFormula = isFormula
+            measurementType.formula = formula
+            measurementType.dependencies = dependencies
             do {
                 try self?.context.save()
                 self?.loadMeasurementTypes()
@@ -360,6 +409,11 @@ extension CategoriesViewController: UITableViewDelegate, UITableViewDataSource {
         if let colorHex = measurementType.color {
             let color = UIColor(hex: colorHex)
             content.image = UIImage(systemName: "circle.fill")?.withTintColor(color, renderingMode: .alwaysOriginal)
+        }
+        if measurementType.isFormula {
+            content.text = "\(measurementType.name ?? "") (fx)"
+            content.secondaryText = "Formula: \(measurementType.formula ?? "")\nUnit: \(measurementType.unit ?? "")"
+            content.image = UIImage(systemName: "function")
         }
         cell.contentConfiguration = content
         
@@ -560,6 +614,7 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
         addButton.tag = section
         addButton.addTarget(self, action: #selector(addButtonTapped(_:)), for: .touchUpInside)
         addButton.translatesAutoresizingMaskIntoConstraints = false
+        addButton.isHidden = measurementTypes[section].isFormula // Hide + for formula
         
         let chevronImage = UIImage(systemName: expandedSections.contains(section) ? "chevron.down" : "chevron.right")
         let chevronButton = UIButton(type: .system)
@@ -614,18 +669,76 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
     }
     
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return expandedSections.contains(section) ? (measurementTypes[section].entries?.count ?? 0) : 0
+        let type = measurementTypes[section]
+        if type.isFormula {
+            // Count unique days where all dependencies are present
+            let dependencyNames = (type.dependencies ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            guard !dependencyNames.isEmpty, let formula = type.formula else { return 0 }
+            // Gather all entries for dependencies
+            var dayToValues: [String: [String: Double]] = [:] // dateString: [dep: value]
+            for depName in dependencyNames {
+                if let depType = measurementTypes.first(where: { $0.name == depName }), let entries = depType.entries as? Set<MeasurementEntry> {
+                    for entry in entries {
+                        if let date = entry.timestamp {
+                            let day = Calendar.current.startOfDay(for: date)
+                            let dayStr = ISO8601DateFormatter().string(from: day)
+                            dayToValues[dayStr, default: [:]][depName] = entry.value
+                        }
+                    }
+                }
+            }
+            // Only include days where all dependencies are present
+            let validDays = dayToValues.filter { $0.value.keys.count == dependencyNames.count }
+            return expandedSections.contains(section) ? validDays.count : 0
+        } else {
+            return expandedSections.contains(section) ? (type.entries?.count ?? 0) : 0
+        }
     }
     
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath)
-        let measurementType = measurementTypes[indexPath.section]
-        if let entry = measurementType.entries?.allObjects[indexPath.row] as? MeasurementEntry {
-            var content = cell.defaultContentConfiguration()
-            let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .short
-            if measurementType.unit == "Picture", let imageData = entry.image, let image = UIImage(data: imageData) {
+        let type = measurementTypes[indexPath.section]
+        var content = cell.defaultContentConfiguration()
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        if type.isFormula {
+            // Show calculated value for the day
+            let dependencyNames = (type.dependencies ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            guard !dependencyNames.isEmpty, let formula = type.formula else { return cell }
+            // Gather all entries for dependencies
+            var dayToValues: [String: [String: Double]] = [:]
+            var dayToDate: [String: Date] = [:]
+            for depName in dependencyNames {
+                if let depType = measurementTypes.first(where: { $0.name == depName }), let entries = depType.entries as? Set<MeasurementEntry> {
+                    for entry in entries {
+                        if let date = entry.timestamp {
+                            let day = Calendar.current.startOfDay(for: date)
+                            let dayStr = ISO8601DateFormatter().string(from: day)
+                            dayToValues[dayStr, default: [:]][depName] = entry.value
+                            dayToDate[dayStr] = day
+                        }
+                    }
+                }
+            }
+            // Only include days where all dependencies are present
+            let validDays = dayToValues.filter { $0.value.keys.count == dependencyNames.count }
+            let sortedDays = validDays.keys.sorted(by: >)
+            let dayStr = sortedDays[indexPath.row]
+            let values = validDays[dayStr]!
+            let date = dayToDate[dayStr] ?? Date()
+            // Evaluate formula
+            let expr = NSExpression(format: formula)
+            let result = expr.expressionValue(with: values, context: nil) as? Double ?? 0.0
+            content.text = "\(result.clean) \(type.unit ?? "")"
+            content.secondaryText = formatter.string(from: date)
+            if let colorHex = type.color {
+                content.textProperties.color = UIColor(hex: colorHex)
+            }
+            cell.contentConfiguration = content
+            cell.selectionStyle = .none
+        } else if let entry = type.entries?.allObjects[indexPath.row] as? MeasurementEntry {
+            if type.unit == "Picture", let imageData = entry.image, let image = UIImage(data: imageData) {
                 // Resize image to thumbnail (fit within 44x44, preserve aspect ratio)
                 let maxThumbnailSize: CGFloat = 44
                 let aspectRatio = image.size.width / image.size.height
@@ -649,9 +762,9 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
                 cell.contentConfiguration = content
                 cell.selectionStyle = .default
             } else {
-                content.text = "\(entry.value) \(measurementType.unit ?? "")"
+                content.text = "\(entry.value) \(type.unit ?? "")"
                 content.secondaryText = formatter.string(from: entry.timestamp ?? Date())
-                if let colorHex = measurementType.color {
+                if let colorHex = type.color {
                     content.textProperties.color = UIColor(hex: colorHex)
                 }
                 cell.contentConfiguration = content
@@ -662,9 +775,13 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
     }
     
     func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
+        let type = measurementTypes[indexPath.section]
+        if type.isFormula {
+            // Do not allow deleting formula rows
+            return
+        }
         if editingStyle == .delete {
-            let measurementType = measurementTypes[indexPath.section]
-            if let entry = measurementType.entries?.allObjects[indexPath.row] as? MeasurementEntry {
+            if let entry = type.entries?.allObjects[indexPath.row] as? MeasurementEntry {
                 context.delete(entry)
                 do {
                     try context.save()
@@ -677,13 +794,18 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
     }
     
     func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
-        return true
+        let type = measurementTypes[indexPath.section]
+        return !type.isFormula
     }
     
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        let measurementType = measurementTypes[indexPath.section]
-        if measurementType.unit == "Picture",
-           let entry = measurementType.entries?.allObjects[indexPath.row] as? MeasurementEntry,
+        let type = measurementTypes[indexPath.section]
+        if type.isFormula {
+            tableView.deselectRow(at: indexPath, animated: true)
+            return
+        }
+        if type.unit == "Picture",
+           let entry = type.entries?.allObjects[indexPath.row] as? MeasurementEntry,
            let imageData = entry.image,
            let image = UIImage(data: imageData) {
             let previewVC = ImagePreviewViewController(image: image)

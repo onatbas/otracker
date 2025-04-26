@@ -6,13 +6,20 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
     private var calendar: FSCalendar!
     private var tableView: UITableView!
     private var measurementsByDate: [Date: [(UIColor, MeasurementEntry)]] = [:]
-    private var selectedMeasurements: [MeasurementEntry] = []
+    private var selectedMeasurements: [Any] = [] // Can be MeasurementEntry or FormulaResult
+    private var allMeasurementTypes: [MeasurementType] = [] // <-- NEW
     private let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
     private let dateFormatter: DateFormatter = {
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd"
         return df
     }()
+    
+    struct FormulaResult {
+        let type: MeasurementType
+        let value: Double
+        let date: Date
+    }
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -85,6 +92,13 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
     }
     
     private func fetchMeasurements() {
+        // Fetch all types (including formulas)
+        let typeRequest: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+        do {
+            allMeasurementTypes = try context.fetch(typeRequest)
+        } catch {
+            allMeasurementTypes = []
+        }
         let request: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
         do {
             let entries = try context.fetch(request)
@@ -107,7 +121,33 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
     
     private func updateSelectedMeasurements(for date: Date) {
         let day = dateFormatter.date(from: dateFormatter.string(from: date))!
-        selectedMeasurements = measurementsByDate[day]?.map { $0.1 } ?? []
+        var entries = measurementsByDate[day]?.map { $0.1 } ?? []
+        // Compute formula results for this day
+        var formulaResults: [FormulaResult] = []
+        for type in allMeasurementTypes where type.isFormula {
+            guard let dependencies = type.dependencies?.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }),
+                  let formula = type.formula else { continue }
+            // Gather dependency values for this day
+            var values: [String: Double] = [:]
+            for depName in dependencies {
+                if let depType = allMeasurementTypes.first(where: { $0.name == depName }),
+                   let depEntries = depType.entries as? Set<MeasurementEntry>,
+                   let depEntry = depEntries.first(where: { entry in
+                        let entryDay = dateFormatter.date(from: dateFormatter.string(from: entry.timestamp ?? Date()))
+                        return entryDay == day
+                   }) {
+                    values[depName] = depEntry.value
+                }
+            }
+            if values.count == dependencies.count {
+                // All dependencies present for this day
+                let expr = NSExpression(format: formula)
+                let result = expr.expressionValue(with: values, context: nil) as? Double ?? 0.0
+                formulaResults.append(FormulaResult(type: type, value: result, date: day))
+            }
+        }
+        // Sort: formula results first, then entries, both by type name
+        selectedMeasurements = formulaResults.sorted { ($0.type.name ?? "") < ($1.type.name ?? "") } + entries.sorted { ($0.type?.name ?? "") < ($1.type?.name ?? "") }
         tableView.reloadData()
     }
     
@@ -133,12 +173,19 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
     
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath)
-        let entry = selectedMeasurements[indexPath.row]
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
-        if let type = entry.type {
-            var content = cell.defaultContentConfiguration()
+        var content = cell.defaultContentConfiguration()
+        let item = selectedMeasurements[indexPath.row]
+        if let formula = item as? FormulaResult {
+            content.text = formula.type.name ?? ""
+            content.secondaryText = "\(formula.value.clean) \(formula.type.unit ?? "")"
+            if let colorHex = formula.type.color {
+                content.textProperties.color = UIColor(hex: colorHex)
+            }
+            cell.selectionStyle = .none
+        } else if let entry = item as? MeasurementEntry, let type = entry.type {
             if type.unit == "Picture", let imageData = entry.image, let image = UIImage(data: imageData) {
                 let thumbnailSize = CGSize(width: 44, height: 44)
                 let renderer = UIGraphicsImageRenderer(size: thumbnailSize)
@@ -172,14 +219,14 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
                 }
                 cell.selectionStyle = .none
             }
-            cell.contentConfiguration = content
         }
+        cell.contentConfiguration = content
         return cell
     }
     
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        let entry = selectedMeasurements[indexPath.row]
-        if let type = entry.type, type.unit == "Picture", let imageData = entry.image, let image = UIImage(data: imageData) {
+        let item = selectedMeasurements[indexPath.row]
+        if let entry = item as? MeasurementEntry, let type = entry.type, type.unit == "Picture", let imageData = entry.image, let image = UIImage(data: imageData) {
             let previewVC = ImagePreviewViewController(image: image)
             present(previewVC, animated: true)
         }
