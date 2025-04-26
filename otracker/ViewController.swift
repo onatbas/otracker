@@ -25,10 +25,10 @@ class MainTabBarController: UITabBarController {
     }
 }
 
-class AddCategoryViewController: UIViewController {
+class AddCategoryViewController: UIViewController, UITextFieldDelegate {
     private let nameTextField = UITextField()
     private let unitTextField = UITextField()
-    private let unitOptions = ["cm", "ft", "kg", "lb", "%", "in", "min", "#", "Custom"]
+    private let unitOptions = ["cm", "ft", "kg", "lb", "%", "in", "min", "#", "Picture", "Custom"]
     private var unitButtons: [UIButton] = []
     private var selectedUnit: String = "cm"
     private let saveButton = UIButton(type: .system)
@@ -61,6 +61,7 @@ class AddCategoryViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
+        nameTextField.delegate = self
     }
     
     private func setupUI() {
@@ -94,8 +95,15 @@ class AddCategoryViewController: UIViewController {
                 if idx < unitOptions.count {
                     let unit = unitOptions[idx]
                     let button = UIButton(type: .system)
-                    button.setTitle(unit, for: .normal)
-                    button.setTitleColor(.label, for: .normal)
+                    if unit == "Picture" {
+                        let cameraImage = UIImage(systemName: "camera")
+                        button.setImage(cameraImage, for: .normal)
+                        button.tintColor = .label
+                        button.setTitle(nil, for: .normal)
+                    } else {
+                        button.setTitle(unit, for: .normal)
+                        button.setTitleColor(.label, for: .normal)
+                    }
                     button.backgroundColor = .systemGray6
                     button.layer.cornerRadius = 8
                     button.layer.borderWidth = (unit == selectedUnit) ? 2 : 0
@@ -243,6 +251,14 @@ class AddCategoryViewController: UIViewController {
     @objc private func closeTapped() {
         dismiss(animated: true)
     }
+    
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        if textField == nameTextField {
+            saveButtonTapped()
+            return false
+        }
+        return true
+    }
 }
 
 class CategoriesViewController: UIViewController {
@@ -369,11 +385,12 @@ extension CategoriesViewController: UITableViewDelegate, UITableViewDataSource {
     }
 }
 
-class MeasurementsViewController: UIViewController {
+class MeasurementsViewController: UIViewController, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
     private let tableView = UITableView()
     private var measurementTypes: [MeasurementType] = []
     private let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
     private var expandedSections: Set<Int> = []
+    private var imagePickerCompletion: ((UIImage) -> Void)?
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -417,36 +434,85 @@ class MeasurementsViewController: UIViewController {
     }
     
     private func addMeasurement(for type: MeasurementType) {
-        let alert = UIAlertController(title: "Add Measurement", message: "Enter value for \(type.name ?? "")", preferredStyle: .alert)
-        
-        alert.addTextField { textField in
-            textField.placeholder = "Value in \(type.unit ?? "")"
-            textField.keyboardType = .decimalPad
-        }
-        
-        let addAction = UIAlertAction(title: "Add", style: .default) { [weak self] _ in
-            guard let valueText = alert.textFields?[0].text,
-                  let value = Double(valueText) else { return }
-            
-            let entry = MeasurementEntry(context: self!.context)
-            entry.value = value
-            entry.timestamp = Date()
-            entry.type = type
-            
-            do {
-                try self?.context.save()
-                self?.tableView.reloadData()
-            } catch {
-                print("Error saving measurement entry: \(error)")
+        if type.unit == "Picture" {
+            let actionSheet = UIAlertController(title: "Add Picture", message: nil, preferredStyle: .actionSheet)
+            actionSheet.addAction(UIAlertAction(title: "Take Photo", style: .default, handler: { [weak self] _ in
+                self?.presentImagePicker(sourceType: .camera) { image in
+                    self?.savePictureEntry(image: image, type: type)
+                }
+            }))
+            actionSheet.addAction(UIAlertAction(title: "Choose from Library", style: .default, handler: { [weak self] _ in
+                self?.presentImagePicker(sourceType: .photoLibrary) { image in
+                    self?.savePictureEntry(image: image, type: type)
+                }
+            }))
+            actionSheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            if let popover = actionSheet.popoverPresentationController {
+                popover.sourceView = self.view
+                popover.sourceRect = CGRect(x: self.view.bounds.midX, y: self.view.bounds.midY, width: 0, height: 0)
+                popover.permittedArrowDirections = []
             }
+            present(actionSheet, animated: true)
+        } else {
+            let alert = UIAlertController(title: "Add Measurement", message: "Enter value for \(type.name ?? "")", preferredStyle: .alert)
+            alert.addTextField { textField in
+                textField.placeholder = "Value in \(type.unit ?? "")"
+                textField.keyboardType = .decimalPad
+            }
+            let addAction = UIAlertAction(title: "Add", style: .default) { [weak self] _ in
+                guard let valueText = alert.textFields?[0].text,
+                      let value = Double(valueText) else { return }
+                let entry = MeasurementEntry(context: self!.context)
+                entry.value = value
+                entry.timestamp = Date()
+                entry.type = type
+                do {
+                    try self?.context.save()
+                    self?.tableView.reloadData()
+                } catch {
+                    print("Error saving measurement entry: \(error)")
+                }
+            }
+            let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
+            alert.addAction(addAction)
+            alert.addAction(cancelAction)
+            present(alert, animated: true)
         }
-        
-        let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
-        
-        alert.addAction(addAction)
-        alert.addAction(cancelAction)
-        
-        present(alert, animated: true)
+    }
+    
+    private func presentImagePicker(sourceType: UIImagePickerController.SourceType = .photoLibrary, completion: @escaping (UIImage) -> Void) {
+        imagePickerCompletion = completion
+        let picker = UIImagePickerController()
+        picker.delegate = self
+        picker.sourceType = sourceType
+        present(picker, animated: true)
+    }
+    
+    private func savePictureEntry(image: UIImage, type: MeasurementType) {
+        let entry = MeasurementEntry(context: self.context)
+        entry.timestamp = Date()
+        entry.type = type
+        entry.value = 0 // Not used for picture
+        entry.image = image.jpegData(compressionQuality: 0.8)
+        do {
+            try self.context.save()
+            self.tableView.reloadData()
+        } catch {
+            print("Error saving picture measurement entry: \(error)")
+        }
+    }
+    
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+        picker.dismiss(animated: true)
+        if let image = info[.originalImage] as? UIImage {
+            imagePickerCompletion?(image)
+        }
+        imagePickerCompletion = nil
+    }
+    
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true)
+        imagePickerCompletion = nil
     }
     
     private func toggleSection(_ section: Int) {
@@ -549,20 +615,35 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath)
         let measurementType = measurementTypes[indexPath.section]
-        
         if let entry = measurementType.entries?.allObjects[indexPath.row] as? MeasurementEntry {
             var content = cell.defaultContentConfiguration()
             let formatter = DateFormatter()
             formatter.dateStyle = .medium
             formatter.timeStyle = .short
-            content.text = "\(entry.value) \(measurementType.unit ?? "")"
-            content.secondaryText = formatter.string(from: entry.timestamp ?? Date())
-            if let colorHex = measurementType.color {
-                content.textProperties.color = UIColor(hex: colorHex)
+            if measurementType.unit == "Picture", let imageData = entry.image, let image = UIImage(data: imageData) {
+                // Resize image to thumbnail (44x44)
+                let thumbnailSize = CGSize(width: 44, height: 44)
+                let renderer = UIGraphicsImageRenderer(size: thumbnailSize)
+                let thumbnail = renderer.image { _ in
+                    image.draw(in: CGRect(origin: .zero, size: thumbnailSize))
+                }
+                content.image = thumbnail
+                content.imageProperties.cornerRadius = 8
+                content.imageProperties.maximumSize = thumbnailSize
+                content.text = nil
+                content.secondaryText = formatter.string(from: entry.timestamp ?? Date())
+                cell.contentConfiguration = content
+                cell.selectionStyle = .default
+            } else {
+                content.text = "\(entry.value) \(measurementType.unit ?? "")"
+                content.secondaryText = formatter.string(from: entry.timestamp ?? Date())
+                if let colorHex = measurementType.color {
+                    content.textProperties.color = UIColor(hex: colorHex)
+                }
+                cell.contentConfiguration = content
+                cell.selectionStyle = .none
             }
-            cell.contentConfiguration = content
         }
-        
         return cell
     }
     
@@ -571,7 +652,6 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
             let measurementType = measurementTypes[indexPath.section]
             if let entry = measurementType.entries?.allObjects[indexPath.row] as? MeasurementEntry {
                 context.delete(entry)
-                
                 do {
                     try context.save()
                     tableView.deleteRows(at: [indexPath], with: .automatic)
@@ -584,6 +664,18 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
     
     func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
         return true
+    }
+    
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        let measurementType = measurementTypes[indexPath.section]
+        if measurementType.unit == "Picture",
+           let entry = measurementType.entries?.allObjects[indexPath.row] as? MeasurementEntry,
+           let imageData = entry.image,
+           let image = UIImage(data: imageData) {
+            let previewVC = ImagePreviewViewController(image: image)
+            present(previewVC, animated: true)
+        }
+        tableView.deselectRow(at: indexPath, animated: true)
     }
 }
 
@@ -615,6 +707,74 @@ extension UIColor {
             (a, r, g, b) = (255, 0, 0, 0)
         }
         self.init(red: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: CGFloat(a) / 255)
+    }
+}
+
+// MARK: - Image Preview View Controller
+class ImagePreviewViewController: UIViewController {
+    private let image: UIImage
+    
+    init(image: UIImage) {
+        self.image = image
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .fullScreen
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleAspectFit
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(imageView)
+        
+        NSLayoutConstraint.activate([
+            imageView.topAnchor.constraint(equalTo: view.topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        
+        let closeButton = UIButton(type: .system)
+        closeButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
+        closeButton.tintColor = .white
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+        view.addSubview(closeButton)
+        NSLayoutConstraint.activate([
+            closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            closeButton.widthAnchor.constraint(equalToConstant: 36),
+            closeButton.heightAnchor.constraint(equalToConstant: 36)
+        ])
+        
+        let shareButton = UIButton(type: .system)
+        shareButton.setImage(UIImage(systemName: "square.and.arrow.up"), for: .normal)
+        shareButton.tintColor = .white
+        shareButton.translatesAutoresizingMaskIntoConstraints = false
+        shareButton.addTarget(self, action: #selector(shareTapped), for: .touchUpInside)
+        view.addSubview(shareButton)
+        NSLayoutConstraint.activate([
+            shareButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            shareButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            shareButton.widthAnchor.constraint(equalToConstant: 36),
+            shareButton.heightAnchor.constraint(equalToConstant: 36)
+        ])
+    }
+    
+    @objc private func closeTapped() {
+        dismiss(animated: true)
+    }
+    
+    @objc private func shareTapped() {
+        let activityVC = UIActivityViewController(activityItems: [image], applicationActivities: nil)
+        activityVC.popoverPresentationController?.sourceView = self.view
+        present(activityVC, animated: true)
     }
 }
 
