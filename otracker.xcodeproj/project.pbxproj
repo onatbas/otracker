@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		68D3492A2DBD699500AC81FE /* FSCalendar in Frameworks */ = {isa = PBXBuildFile; productRef = 68D349292DBD699500AC81FE /* FSCalendar */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		6808D4E62DBD54D50069C150 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -65,6 +69,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				68D3492A2DBD699500AC81FE /* FSCalendar in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -125,6 +130,7 @@
 			);
 			name = otracker;
 			packageProductDependencies = (
+				68D349292DBD699500AC81FE /* FSCalendar */,
 			);
 			productName = otracker;
 			productReference = 6808D4CC2DBD54D40069C150 /* otracker.app */;
@@ -208,6 +214,9 @@
 			);
 			mainGroup = 6808D4C32DBD54D40069C150;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				68D349282DBD699500AC81FE /* XCRemoteSwiftPackageReference "FSCalendar" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6808D4CD2DBD54D40069C150 /* Products */;
 			projectDirPath = "";
@@ -567,6 +576,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		68D349282DBD699500AC81FE /* XCRemoteSwiftPackageReference "FSCalendar" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/WenchaoD/FSCalendar";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.8.4;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		68D349292DBD699500AC81FE /* FSCalendar */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 68D349282DBD699500AC81FE /* XCRemoteSwiftPackageReference "FSCalendar" */;
+			productName = FSCalendar;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 6808D4C42DBD54D40069C150 /* Project object */;
 }

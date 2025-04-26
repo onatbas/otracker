@@ -21,7 +21,10 @@ class MainTabBarController: UITabBarController {
         let measurementsVC = MeasurementsViewController()
         measurementsVC.tabBarItem = UITabBarItem(title: "Measurements", image: UIImage(systemName: "ruler"), tag: 1)
         
-        viewControllers = [categoriesVC, measurementsVC]
+        let calendarVC = CalendarViewController()
+        calendarVC.tabBarItem = UITabBarItem(title: "Calendar", image: UIImage(systemName: "calendar"), tag: 2)
+        
+        viewControllers = [categoriesVC, measurementsVC, calendarVC]
     }
 }
 
@@ -454,29 +457,23 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
             }
             present(actionSheet, animated: true)
         } else {
-            let alert = UIAlertController(title: "Add Measurement", message: "Enter value for \(type.name ?? "")", preferredStyle: .alert)
-            alert.addTextField { textField in
-                textField.placeholder = "Value in \(type.unit ?? "")"
-                textField.keyboardType = .decimalPad
-            }
-            let addAction = UIAlertAction(title: "Add", style: .default) { [weak self] _ in
-                guard let valueText = alert.textFields?[0].text,
-                      let value = Double(valueText) else { return }
-                let entry = MeasurementEntry(context: self!.context)
+            let addVC = AddMeasurementViewController(type: type) { [weak self] value, date in
+                guard let self = self else { return }
+                let entry = MeasurementEntry(context: self.context)
                 entry.value = value
-                entry.timestamp = Date()
+                entry.timestamp = date
                 entry.type = type
                 do {
-                    try self?.context.save()
-                    self?.tableView.reloadData()
+                    try self.context.save()
+                    self.tableView.reloadData()
+                    NotificationCenter.default.post(name: .measurementAdded, object: nil)
                 } catch {
                     print("Error saving measurement entry: \(error)")
                 }
             }
-            let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
-            alert.addAction(addAction)
-            alert.addAction(cancelAction)
-            present(alert, animated: true)
+            let nav = UINavigationController(rootViewController: addVC)
+            nav.modalPresentationStyle = .fullScreen
+            present(nav, animated: true)
         }
     }
     
@@ -497,6 +494,7 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
         do {
             try self.context.save()
             self.tableView.reloadData()
+            NotificationCenter.default.post(name: .measurementAdded, object: nil)
         } catch {
             print("Error saving picture measurement entry: \(error)")
         }
@@ -776,5 +774,105 @@ class ImagePreviewViewController: UIViewController {
         activityVC.popoverPresentationController?.sourceView = self.view
         present(activityVC, animated: true)
     }
+}
+
+// MARK: - Add Measurement View Controller
+class AddMeasurementViewController: UIViewController, UITextFieldDelegate {
+    private let type: MeasurementType
+    private let completion: (Double, Date) -> Void
+    private let valueTextField = UITextField()
+    private let saveButton = UIButton(type: .system)
+    private let datePicker = UIDatePicker()
+    
+    init(type: MeasurementType, completion: @escaping (Double, Date) -> Void) {
+        self.type = type
+        self.completion = completion
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .fullScreen
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        title = "Add Measurement"
+        setupUI()
+    }
+    
+    private func setupUI() {
+        navigationItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: .close, target: self, action: #selector(closeTapped))
+        
+        let nameLabel = UILabel()
+        nameLabel.text = type.name
+        nameLabel.font = .systemFont(ofSize: 24, weight: .bold)
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(nameLabel)
+        
+        valueTextField.placeholder = "Value in \(type.unit ?? "")"
+        valueTextField.borderStyle = .roundedRect
+        valueTextField.keyboardType = .decimalPad
+        valueTextField.delegate = self
+        valueTextField.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(valueTextField)
+        
+        datePicker.datePickerMode = .dateAndTime
+        datePicker.preferredDatePickerStyle = .compact
+        datePicker.translatesAutoresizingMaskIntoConstraints = false
+        datePicker.maximumDate = Date().addingTimeInterval(60*60*24*365) // 1 year in future
+        datePicker.minimumDate = Date().addingTimeInterval(-60*60*24*365*10) // 10 years in past
+        datePicker.date = Date()
+        view.addSubview(datePicker)
+        
+        saveButton.setTitle("Save", for: .normal)
+        saveButton.backgroundColor = .systemBlue
+        saveButton.setTitleColor(.white, for: .normal)
+        saveButton.layer.cornerRadius = 8
+        saveButton.addTarget(self, action: #selector(saveButtonTapped), for: .touchUpInside)
+        saveButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(saveButton)
+        
+        NSLayoutConstraint.activate([
+            nameLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 40),
+            nameLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            
+            valueTextField.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 40),
+            valueTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
+            valueTextField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
+            valueTextField.heightAnchor.constraint(equalToConstant: 44),
+            
+            datePicker.topAnchor.constraint(equalTo: valueTextField.bottomAnchor, constant: 24),
+            datePicker.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            
+            saveButton.topAnchor.constraint(equalTo: datePicker.bottomAnchor, constant: 40),
+            saveButton.leadingAnchor.constraint(equalTo: valueTextField.leadingAnchor),
+            saveButton.trailingAnchor.constraint(equalTo: valueTextField.trailingAnchor),
+            saveButton.heightAnchor.constraint(equalToConstant: 44)
+        ])
+    }
+    
+    @objc private func saveButtonTapped() {
+        guard let valueText = valueTextField.text, let value = Double(valueText) else { return }
+        completion(value, datePicker.date)
+        dismiss(animated: true)
+    }
+    
+    @objc private func closeTapped() {
+        dismiss(animated: true)
+    }
+    
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        if textField == valueTextField {
+            saveButtonTapped()
+            return false
+        }
+        return true
+    }
+}
+
+extension Notification.Name {
+    static let measurementAdded = Notification.Name("MeasurementAdded")
 }
 
