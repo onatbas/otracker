@@ -7,6 +7,8 @@
 
 import UIKit
 import CoreData
+import Charts
+import SwiftUI
 
 class MainTabBarController: UITabBarController {
     override func viewDidLoad() {
@@ -24,7 +26,12 @@ class MainTabBarController: UITabBarController {
         let calendarVC = CalendarViewController()
         calendarVC.tabBarItem = UITabBarItem(title: "Calendar", image: UIImage(systemName: "calendar"), tag: 2)
         
-        viewControllers = [categoriesVC, measurementsVC, calendarVC]
+        // Add SwiftUI GraphTabView as the fourth tab
+        let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
+        let graphVC = UIHostingController(rootView: GraphTabView().environment(\.managedObjectContext, context))
+        graphVC.tabBarItem = UITabBarItem(title: "Graph", image: UIImage(systemName: "chart.xyaxis.line"), tag: 3)
+        
+        viewControllers = [categoriesVC, measurementsVC, calendarVC, graphVC]
     }
 }
 
