@@ -279,8 +279,14 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
             if type.unit == "Picture", let imageData = entry.image, let image = UIImage(data: imageData) {
                 let thumbnailSize = CGSize(width: 44, height: 44)
                 let renderer = UIGraphicsImageRenderer(size: thumbnailSize)
-                let thumbnail = renderer.image { _ in
-                    image.draw(in: CGRect(origin: .zero, size: thumbnailSize))
+                let thumbnail = renderer.image { context in
+                    // Calculate the aspect ratio preserving rect
+                    let imageSize = image.size
+                    let scale = min(thumbnailSize.width / imageSize.width, thumbnailSize.height / imageSize.height)
+                    let scaledSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+                    let x = (thumbnailSize.width - scaledSize.width) / 2
+                    let y = (thumbnailSize.height - scaledSize.height) / 2
+                    image.draw(in: CGRect(x: x, y: y, width: scaledSize.width, height: scaledSize.height))
                 }
                 content.image = thumbnail
                 content.imageProperties.cornerRadius = 8

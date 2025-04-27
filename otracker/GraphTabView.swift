@@ -124,6 +124,7 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
     
     class Coordinator {
         var healthKitSamples: [HKQuantitySample] = []
+        var dates: [Date] = []
     }
     
     func makeCoordinator() -> Coordinator {
@@ -134,6 +135,13 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
         let chartView = LineChartView()
         chartView.rightAxis.enabled = false
         chartView.xAxis.labelPosition = .bottom
+        chartView.xAxis.labelRotationAngle = -45
+        
+        // Create and configure the date formatter
+        let dateFormatter = DateAxisValueFormatter()
+        dateFormatter.chartView = chartView
+        chartView.xAxis.valueFormatter = dateFormatter
+        
         chartView.legend.enabled = false
         chartView.setScaleEnabled(true)
         chartView.pinchZoomEnabled = true
@@ -142,6 +150,16 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
         chartView.dragEnabled = true
         chartView.animate(xAxisDuration: 0.5)
         chartView.scaleYEnabled = false
+        
+        // Configure marker
+        let marker = BalloonMarker(color: .systemBlue,
+                                  font: .systemFont(ofSize: 12),
+                                  textColor: .white,
+                                  insets: UIEdgeInsets(top: 8, left: 8, bottom: 20, right: 8))
+        marker.chartView = chartView
+        marker.minimumSize = CGSize(width: 80, height: 40)
+        chartView.marker = marker
+        
         return chartView
     }
     
@@ -152,6 +170,10 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
                 DispatchQueue.main.async {
                     context.coordinator.healthKitSamples = samples
                     let sorted = samples.sorted { $0.endDate < $1.endDate }
+                    context.coordinator.dates = sorted.map { $0.endDate }
+                    if let formatter = uiView.xAxis.valueFormatter as? DateAxisValueFormatter {
+                        formatter.dates = context.coordinator.dates
+                    }
                     let chartEntries = sorted.enumerated().map { (idx, sample) -> ChartDataEntry in
                         // Use kg for body mass, meters for height, etc.
                         let value: Double
@@ -225,6 +247,10 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
             
             let validDays = dayToValues.filter { $0.value.keys.count == dependencies.count }
             let sortedDays = validDays.keys.sorted()
+            context.coordinator.dates = sortedDays.compactMap { dayToDate[$0] }
+            if let formatter = uiView.xAxis.valueFormatter as? DateAxisValueFormatter {
+                formatter.dates = context.coordinator.dates
+            }
             let chartEntries: [ChartDataEntry] = sortedDays.enumerated().map { (idx, dayStr) in
                 let values = validDays[dayStr]!
                 let expr = NSExpression(format: formula)
@@ -251,6 +277,10 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
                 return
             }
             let sorted = entries.sorted { ($0.timestamp ?? Date()) < ($1.timestamp ?? Date()) }
+            context.coordinator.dates = sorted.compactMap { $0.timestamp }
+            if let formatter = uiView.xAxis.valueFormatter as? DateAxisValueFormatter {
+                formatter.dates = context.coordinator.dates
+            }
             let chartEntries = sorted.enumerated().map { (idx, entry) -> ChartDataEntry in
                 ChartDataEntry(x: Double(idx), y: entry.value)
             }
@@ -264,6 +294,149 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
             let data = LineChartData(dataSet: dataSet)
             uiView.data = data
         }
+    }
+}
+
+// Custom value formatter for x-axis dates
+class DateAxisValueFormatter: NSObject, AxisValueFormatter {
+    let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        return formatter
+    }()
+    
+    weak var chartView: LineChartView?
+    var dates: [Date] = []
+    
+    func stringForValue(_ value: Double, axis: AxisBase?) -> String {
+        let index = Int(round(value))
+        if index >= 0 && index < dates.count {
+            return dateFormatter.string(from: dates[index])
+        }
+        return ""
+    }
+}
+
+// Custom marker to show values when highlighting
+class BalloonMarker: MarkerImage {
+    private var color: UIColor
+    private var font: UIFont
+    private var textColor: UIColor
+    private var insets: UIEdgeInsets
+    var minimumSize = CGSize()
+    
+    private var label: String?
+    private var _labelSize: CGSize = CGSize()
+    private var _paragraphStyle: NSMutableParagraphStyle?
+    private var _drawAttributes = [NSAttributedString.Key: Any]()
+    
+    init(color: UIColor, font: UIFont, textColor: UIColor, insets: UIEdgeInsets) {
+        self.color = color
+        self.font = font
+        self.textColor = textColor
+        self.insets = insets
+        
+        _paragraphStyle = NSParagraphStyle.default.mutableCopy() as? NSMutableParagraphStyle
+        _paragraphStyle?.alignment = .center
+        super.init()
+    }
+    
+    public override func draw(context: CGContext, point: CGPoint) {
+        guard let label = label else { return }
+        
+        let offset = self.offsetForDrawing(atPoint: point)
+        let size = self.size
+        
+        var rect = CGRect(
+            origin: CGPoint(
+                x: point.x + offset.x,
+                y: point.y + offset.y),
+            size: size)
+        rect.origin.x -= size.width / 2.0
+        rect.origin.y -= size.height
+        
+        context.saveGState()
+        
+        context.setFillColor(color.cgColor)
+        
+        if offset.y > 0 {
+            context.beginPath()
+            context.move(to: CGPoint(
+                x: rect.origin.x,
+                y: rect.origin.y + rect.size.height))
+            context.addLine(to: CGPoint(
+                x: rect.origin.x + (rect.size.width - 8) / 2.0,
+                y: rect.origin.y + rect.size.height + 8))
+            context.addLine(to: CGPoint(
+                x: point.x,
+                y: point.y))
+            context.addLine(to: CGPoint(
+                x: rect.origin.x + (rect.size.width + 8) / 2.0,
+                y: rect.origin.y + rect.size.height + 8))
+            context.addLine(to: CGPoint(
+                x: rect.origin.x + rect.size.width,
+                y: rect.origin.y + rect.size.height))
+            context.closePath()
+            context.fillPath()
+        } else {
+            context.beginPath()
+            context.move(to: CGPoint(
+                x: rect.origin.x,
+                y: rect.origin.y))
+            context.addLine(to: CGPoint(
+                x: rect.origin.x + rect.size.width,
+                y: rect.origin.y))
+            context.addLine(to: CGPoint(
+                x: rect.origin.x + rect.size.width,
+                y: rect.origin.y + rect.size.height))
+            context.addLine(to: CGPoint(
+                x: rect.origin.x + (rect.size.width + 8) / 2.0,
+                y: rect.origin.y + rect.size.height + 8))
+            context.addLine(to: CGPoint(
+                x: point.x,
+                y: point.y))
+            context.addLine(to: CGPoint(
+                x: rect.origin.x + (rect.size.width - 8) / 2.0,
+                y: rect.origin.y + rect.size.height + 8))
+            context.addLine(to: CGPoint(
+                x: rect.origin.x,
+                y: rect.origin.y + rect.size.height))
+            context.closePath()
+            context.fillPath()
+        }
+        
+        rect.origin.y += self.insets.top
+        rect.size.height -= self.insets.top + self.insets.bottom
+        
+        UIGraphicsPushContext(context)
+        
+        label.draw(in: rect, withAttributes: _drawAttributes)
+        
+        UIGraphicsPopContext()
+        
+        context.restoreGState()
+    }
+    
+    public override func refreshContent(entry: ChartDataEntry, highlight: Highlight) {
+        setLabel(String(format: "%.2f", entry.y))
+    }
+    
+    public func setLabel(_ newLabel: String) {
+        label = newLabel
+        
+        _drawAttributes.removeAll()
+        _drawAttributes[.font] = self.font
+        _drawAttributes[.paragraphStyle] = _paragraphStyle
+        _drawAttributes[.foregroundColor] = self.textColor
+        
+        _labelSize = label?.size(withAttributes: _drawAttributes) ?? CGSize.zero
+        
+        var size = CGSize()
+        size.width = _labelSize.width + self.insets.left + self.insets.right
+        size.height = _labelSize.height + self.insets.top + self.insets.bottom
+        size.width = max(minimumSize.width, size.width)
+        size.height = max(minimumSize.height, size.height)
+        self.size = size
     }
 }
 
