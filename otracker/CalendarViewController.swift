@@ -99,6 +99,11 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
         request.predicate = NSPredicate(format: "isVisible == YES")
         do {
             allMeasurementTypes = try context.fetch(request)
+            print("\n=== Calendar View - Loaded Types ===")
+            print("Total types: \(allMeasurementTypes.count)")
+            for type in allMeasurementTypes {
+                print("- \(type.name ?? "Unknown"): visible=\(type.isVisible)")
+            }
             tableView.reloadData()
         } catch {
             print("Error fetching measurement types: \(error)")
@@ -112,7 +117,11 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
         do {
             let entries = try context.fetch(requestEntries)
             for entry in entries {
-                guard let timestamp = entry.timestamp, let type = entry.type, let colorHex = type.color else { continue }
+                guard let timestamp = entry.timestamp, 
+                      let type = entry.type, 
+                      let colorHex = type.color,
+                      type.isVisible else { continue } // Skip hidden types
+                
                 // Skip HealthKit-linked types
                 if type.healthKitIdentifier != nil { continue }
                 let day = dateFormatter.date(from: dateFormatter.string(from: timestamp))!
@@ -181,16 +190,27 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
     private func updateSelectedMeasurements(for date: Date) {
         let day = dateFormatter.date(from: dateFormatter.string(from: date))!
         var entries = measurementsByDate[day]?.map { $0.1 } ?? []
+        
+        // Fetch all types for formula calculations
+        let allTypesRequest: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+        var allTypes: [MeasurementType] = []
+        do {
+            allTypes = try context.fetch(allTypesRequest)
+        } catch {
+            print("Error fetching all types for formula: \(error)")
+            return
+        }
+        
         // Compute formula results for this day
         var formulaResults: [FormulaResult] = []
-        for type in allMeasurementTypes where type.isFormula {
+        for type in allTypes where type.isFormula {
             guard let dependencies = type.dependencies?.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }),
                   let formula = type.formula else { continue }
             
             // Gather all entries for dependencies
             var depEntries: [String: [MeasurementEntry]] = [:]
             for depName in dependencies {
-                if let depType = allMeasurementTypes.first(where: { $0.name == depName }),
+                if let depType = allTypes.first(where: { $0.name == depName }),
                    let entries = depType.entries as? Set<MeasurementEntry> {
                     depEntries[depName] = entries.sorted { ($0.timestamp ?? Date.distantPast) < ($1.timestamp ?? Date.distantPast) }
                 }
@@ -250,7 +270,7 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
         let item = selectedMeasurements[indexPath.row]
         if let formula = item as? FormulaResult {
             content.text = formula.type.name ?? ""
-            content.secondaryText = "\(formula.value.clean) \(formula.type.unit ?? "")"
+            content.secondaryText = "\(formula.value.formatted) \(formula.type.unit ?? "")"
             if let colorHex = formula.type.color {
                 content.textProperties.color = UIColor(hex: colorHex)
             }
@@ -283,7 +303,7 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
                     }
                 }
                 content.text = type.name
-                content.secondaryText = "\(triangle)\(entry.value) \(type.unit ?? "")"
+                content.secondaryText = "\(triangle)\(entry.value.formatted) \(type.unit ?? "")"
                 if let colorHex = type.color {
                     content.textProperties.color = UIColor(hex: colorHex)
                 }

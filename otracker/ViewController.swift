@@ -829,13 +829,27 @@ class CategoriesViewController: UIViewController {
     }
     
     private func loadMeasurementTypes() {
-        let request: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+        // First fetch all types for formula calculations
+        let allTypesRequest: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+        var allTypes: [MeasurementType] = []
         do {
-            measurementTypes = try context.fetch(request)
-            tableView.reloadData()
+            allTypes = try context.fetch(allTypesRequest)
+            print("\n=== All Types (including hidden) ===")
+            for type in allTypes {
+                print("- \(type.name ?? "Unknown"): visible=\(type.isVisible)")
+            }
         } catch {
-            print("Error loading measurement types: \(error)")
+            print("Error fetching all types: \(error)")
         }
+
+        // For Categories view, show all types regardless of visibility
+        measurementTypes = allTypes
+        print("\n=== Categories View - Loaded Types ===")
+        print("Total types: \(measurementTypes.count)")
+        for type in measurementTypes {
+            print("- \(type.name ?? "Unknown"): visible=\(type.isVisible)")
+        }
+        tableView.reloadData()
     }
     
     @objc private func addCategory() {
@@ -911,6 +925,9 @@ extension CategoriesViewController: UITableViewDelegate, UITableViewDataSource {
         let visibilityAction = UIContextualAction(style: .normal, title: nil) { [weak self] (_, _, completion) in
             guard let self = self else { return }
             measurementType.isVisible = !measurementType.isVisible
+            print("\n=== Toggling Visibility ===")
+            print("Type: \(measurementType.name ?? "Unknown")")
+            print("New visibility: \(measurementType.isVisible)")
             do {
                 try self.context.save()
                 self.tableView.reloadData()
@@ -999,10 +1016,29 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
     }
     
     private func loadMeasurementTypes() {
-        let request: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
-        request.predicate = NSPredicate(format: "isVisible == YES")
+        // First fetch all types for formula calculations
+        let allTypesRequest: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+        var allTypes: [MeasurementType] = []
         do {
-            measurementTypes = try context.fetch(request)
+            allTypes = try context.fetch(allTypesRequest)
+            print("\n=== All Types (including hidden) ===")
+            for type in allTypes {
+                print("- \(type.name ?? "Unknown"): visible=\(type.isVisible)")
+            }
+        } catch {
+            print("Error fetching all types: \(error)")
+        }
+
+        // Then fetch only visible types for display
+        let visibleRequest: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+        visibleRequest.predicate = NSPredicate(format: "isVisible == YES")
+        do {
+            measurementTypes = try context.fetch(visibleRequest)
+            print("\n=== Visible Types for Display ===")
+            print("Total visible types: \(measurementTypes.count)")
+            for type in measurementTypes {
+                print("- \(type.name ?? "Unknown"): visible=\(type.isVisible)")
+            }
             tableView.reloadData()
         } catch {
             print("Error loading measurement types: \(error)")
@@ -1183,12 +1219,22 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
         print("- Dependencies: \(dependencies)")
         print("- Formula: \(formula)")
         
+        // Fetch all types again to get dependencies regardless of visibility
+        let request: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+        var allTypes: [MeasurementType] = []
+        do {
+            allTypes = try context.fetch(request)
+        } catch {
+            print("Error fetching all types for formula: \(error)")
+            return
+        }
+        
         // Gather all entries for dependencies
         var depEntries: [String: [MeasurementEntry]] = [:]
         var depHealthKitSamples: [String: [HKQuantitySample]] = [:]
         
         for depName in dependencies {
-            if let depType = measurementTypes.first(where: { $0.name == depName }) {
+            if let depType = allTypes.first(where: { $0.name == depName }) {
                 // Get Core Data entries
                 if let entries = depType.entries?.allObjects as? [MeasurementEntry] {
                     depEntries[depName] = entries.sorted { ($0.timestamp ?? Date.distantPast) < ($1.timestamp ?? Date.distantPast) }
@@ -1201,15 +1247,14 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
                 }
                 
                 // Get HealthKit samples if applicable
-                if let hkIdStr = depType.healthKitIdentifier,
-                   let depSection = measurementTypes.firstIndex(where: { $0.name == depName }) {
-                    let samples = healthKitSamplesBySection[depSection] ?? []
+                if let hkIdStr = depType.healthKitIdentifier {
+                    let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
+                    let samples = healthKitSamplesBySection[section] ?? []
                     depHealthKitSamples[depName] = samples
                     print("\nFound \(samples.count) HealthKit samples for \(depName):")
                     for sample in samples {
                         // Determine the correct HKUnit for the type
                         let unit: HKUnit
-                        let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
                         switch hkId {
                         case .bodyMass: unit = .gramUnit(with: .kilo)
                         case .height: unit = .meter()
@@ -1710,7 +1755,7 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
             
             let formula = type.formula ?? ""
             let result = evaluateFormula(formula, values: values)
-            content.text = "\(result.clean) \(type.unit ?? "")"
+            content.text = "\(result.formatted) \(type.unit ?? "")"
             content.secondaryText = formatter.string(from: day)
             if let colorHex = type.color {
                 content.textProperties.color = UIColor(hex: colorHex)
@@ -1744,7 +1789,7 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
             }
             
             let value = sample.quantity.doubleValue(for: unit)
-            content.text = "\(value.clean) \(type.unit ?? "")"
+            content.text = "\(value.formatted) \(type.unit ?? "")"
             content.secondaryText = formatter.string(from: sample.endDate)
             if let colorHex = type.color {
                 content.textProperties.color = UIColor(hex: colorHex)
@@ -1771,7 +1816,7 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
                     }
                     content.text = formatter.string(from: entry.timestamp ?? Date())
                 } else {
-                    content.text = "\(entry.value.clean) \(type.unit ?? "")"
+                    content.text = "\(entry.value.formatted) \(type.unit ?? "")"
                     content.secondaryText = formatter.string(from: entry.timestamp ?? Date())
                 }
                 
@@ -2058,6 +2103,13 @@ class AddMeasurementViewController: UIViewController, UITextFieldDelegate {
 
 extension Notification.Name {
     static let measurementAdded = Notification.Name("MeasurementAdded")
+}
+
+// Add this extension at the end of the file, before the last closing brace
+extension Double {
+    var formatted: String {
+        return String(format: "%.2f", self)
+    }
 }
 
 

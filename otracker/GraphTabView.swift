@@ -57,14 +57,14 @@ struct GraphTabView: View {
             if values.count == dependencies.count {
                 let expr = NSExpression(format: formula)
                 let result = expr.expressionValue(with: values, context: nil) as? Double ?? 0.0
-                return "\(result.clean) \(type.unit ?? "")"
+                return "\(result.formatted) \(type.unit ?? "")"
             } else {
                 return type.unit ?? ""
             }
         } else {
             if let entries = type.entries as? Set<MeasurementEntry>,
                let latest = entries.sorted(by: { ($0.timestamp ?? Date.distantPast) > ($1.timestamp ?? Date.distantPast) }).first {
-                return "\(latest.value.clean) \(type.unit ?? "")"
+                return "\(latest.value.formatted) \(type.unit ?? "")"
             } else {
                 return type.unit ?? ""
             }
@@ -344,11 +344,5 @@ struct ImagePreviewView: View, Identifiable {
                     .padding()
             }
         }
-    }
-}
-
-extension Double {
-    var clean: String {
-        return truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", self) : String(self)
     }
 } 
