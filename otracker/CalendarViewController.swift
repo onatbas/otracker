@@ -293,6 +293,9 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
                 content.imageProperties.maximumSize = thumbnailSize
                 content.text = type.name
                 content.secondaryText = formatter.string(from: entry.timestamp ?? Date())
+                if let note = entry.note, !note.isEmpty {
+                    content.secondaryText = "\(formatter.string(from: entry.timestamp ?? Date()))\n\(note)"
+                }
                 cell.selectionStyle = .default
             } else {
                 // Find previous entry for this type before this entry's timestamp
@@ -309,7 +312,11 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
                     }
                 }
                 content.text = type.name
-                content.secondaryText = "\(triangle)\(entry.value.formatted) \(type.unit ?? "")"
+                var secondaryText = "\(triangle)\(entry.value.formatted) \(type.unit ?? "")"
+                if let note = entry.note, !note.isEmpty {
+                    secondaryText += "\n\(note)"
+                }
+                content.secondaryText = secondaryText
                 if let colorHex = type.color {
                     content.textProperties.color = UIColor(hex: colorHex)
                 }
@@ -323,7 +330,7 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         let item = selectedMeasurements[indexPath.row]
         if let entry = item as? MeasurementEntry, let type = entry.type, type.unit == "Picture", let imageData = entry.image, let image = UIImage(data: imageData) {
-            let previewVC = ImagePreviewViewController(image: image)
+            let previewVC = ImagePreviewViewController(image: image, measurementEntry: entry)
             present(previewVC, animated: true)
         }
         tableView.deselectRow(at: indexPath, animated: true)

@@ -155,7 +155,8 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
         let marker = BalloonMarker(color: .systemBlue,
                                   font: .systemFont(ofSize: 12),
                                   textColor: .white,
-                                  insets: UIEdgeInsets(top: 8, left: 8, bottom: 20, right: 8))
+                                  insets: UIEdgeInsets(top: 8, left: 8, bottom: 20, right: 8),
+                                  context: self.context)
         marker.chartView = chartView
         marker.minimumSize = CGSize(width: 80, height: 40)
         chartView.marker = marker
@@ -188,7 +189,8 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
                         case .waistCircumference: value = sample.quantity.doubleValue(for: .meterUnit(with: .centi))
                         default: value = sample.quantity.doubleValue(for: .count())
                         }
-                        return ChartDataEntry(x: Double(idx), y: value)
+                        let chartEntry = ChartDataEntry(x: Double(idx), y: value)
+                        return chartEntry
                     }
                     if chartEntries.isEmpty {
                         uiView.data = nil
@@ -255,7 +257,8 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
                 let values = validDays[dayStr]!
                 let expr = NSExpression(format: formula)
                 let result = expr.expressionValue(with: values, context: nil) as? Double ?? 0.0
-                return ChartDataEntry(x: Double(idx), y: result)
+                let chartEntry = ChartDataEntry(x: Double(idx), y: result)
+                return chartEntry
             }
             let dataSet = LineChartDataSet(entries: chartEntries, label: type.name ?? "")
             dataSet.colors = [NSUIColor.systemBlue]
@@ -282,7 +285,11 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
                 formatter.dates = context.coordinator.dates
             }
             let chartEntries = sorted.enumerated().map { (idx, entry) -> ChartDataEntry in
-                ChartDataEntry(x: Double(idx), y: entry.value)
+                let chartEntry = ChartDataEntry(x: Double(idx), y: entry.value)
+                if let note = entry.note, !note.isEmpty {
+                    chartEntry.data = note
+                }
+                return chartEntry
             }
             let dataSet = LineChartDataSet(entries: chartEntries, label: type.name ?? "")
             dataSet.colors = [NSUIColor.systemBlue]
@@ -324,17 +331,19 @@ class BalloonMarker: MarkerImage {
     private var textColor: UIColor
     private var insets: UIEdgeInsets
     var minimumSize = CGSize()
+    weak var context: NSManagedObjectContext?
     
     private var label: String?
     private var _labelSize: CGSize = CGSize()
     private var _paragraphStyle: NSMutableParagraphStyle?
     private var _drawAttributes = [NSAttributedString.Key: Any]()
     
-    init(color: UIColor, font: UIFont, textColor: UIColor, insets: UIEdgeInsets) {
+    init(color: UIColor, font: UIFont, textColor: UIColor, insets: UIEdgeInsets, context: NSManagedObjectContext) {
         self.color = color
         self.font = font
         self.textColor = textColor
         self.insets = insets
+        self.context = context
         
         _paragraphStyle = NSParagraphStyle.default.mutableCopy() as? NSMutableParagraphStyle
         _paragraphStyle?.alignment = .center
@@ -418,7 +427,12 @@ class BalloonMarker: MarkerImage {
     }
     
     public override func refreshContent(entry: ChartDataEntry, highlight: Highlight) {
-        setLabel(String(format: "%.2f", entry.y))
+        let value = entry.y
+        if let note = entry.data as? String, !note.isEmpty {
+            setLabel(String(format: "%.1f\n%@", value, note))
+        } else {
+            setLabel(String(format: "%.1f", value))
+        }
     }
     
     public func setLabel(_ newLabel: String) {
@@ -445,6 +459,7 @@ struct PictureGalleryView: View {
     @State private var entries: [MeasurementEntry] = []
     @Environment(\.managedObjectContext) private var context
     @State private var selectedImage: UIImage? = nil
+    @State private var selectedEntry: MeasurementEntry? = nil
     
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -458,7 +473,10 @@ struct PictureGalleryView: View {
                                 .frame(width: 120, height: 120)
                                 .clipped()
                                 .cornerRadius(8)
-                                .onTapGesture { selectedImage = uiImage }
+                                .onTapGesture {
+                                    selectedImage = uiImage
+                                    selectedEntry = entry
+                                }
                             if let date = entry.timestamp {
                                 Text(date, style: .date)
                                     .font(.caption)
@@ -474,14 +492,12 @@ struct PictureGalleryView: View {
         .onChange(of: type) { oldValue, newValue in
             fetchEntries()
         }
-        .fullScreenCover(isPresented: Binding<Bool>(
+        .sheet(isPresented: Binding<Bool>(
             get: { selectedImage != nil },
-            set: { if !$0 { selectedImage = nil } }
+            set: { if !$0 { selectedImage = nil; selectedEntry = nil } }
         )) {
             if let image = selectedImage {
-                ImagePreviewView(image: image) {
-                    selectedImage = nil
-                }
+                ImagePreviewViewControllerRepresentable(image: image, measurementEntry: selectedEntry)
             }
         }
     }
@@ -497,25 +513,99 @@ struct PictureGalleryView: View {
     }
 }
 
+struct ImagePreviewViewControllerRepresentable: UIViewControllerRepresentable {
+    let image: UIImage
+    let measurementEntry: MeasurementEntry?
+    
+    func makeUIViewController(context: Context) -> ImagePreviewViewController {
+        let vc = ImagePreviewViewController(image: image, measurementEntry: measurementEntry)
+        vc.modalPresentationStyle = .fullScreen
+        return vc
+    }
+    
+    func updateUIViewController(_ uiViewController: ImagePreviewViewController, context: Context) {
+        // No updates needed
+    }
+}
+
 struct ImagePreviewView: View, Identifiable {
     let id = UUID()
     let image: UIImage
+    let note: String?
     let onDismiss: () -> Void
+    @State private var editedNote: String?
+    @State private var showNoteEditor = false
     
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack {
             Color.black.ignoresSafeArea()
+            
             Image(uiImage: image)
                 .resizable()
                 .scaledToFit()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Button(action: onDismiss) {
-                Image(systemName: "xmark.circle.fill")
-                    .resizable()
-                    .frame(width: 36, height: 36)
-                    .foregroundColor(.white)
-                    .padding()
+            
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: {
+                        showNoteEditor = true
+                    }) {
+                        Image(systemName: "note.text")
+                            .resizable()
+                            .frame(width: 24, height: 24)
+                            .foregroundColor(.white)
+                            .padding()
+                    }
+                }
+                .padding(.top, 16)
+                .padding(.trailing, 16)
+                
+                Spacer()
+                
+                if let note = editedNote ?? note, !note.isEmpty {
+                    Text(note)
+                        .foregroundColor(.white)
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(Color.black.opacity(0.7))
+                }
             }
+        }
+        .sheet(isPresented: $showNoteEditor) {
+            NoteEditorView(note: $editedNote, onSave: {
+                showNoteEditor = false
+            })
+        }
+    }
+}
+
+struct NoteEditorView: View {
+    @Binding var note: String?
+    let onSave: () -> Void
+    @Environment(\.presentationMode) var presentationMode
+    
+    var body: some View {
+        NavigationView {
+            VStack {
+                TextEditor(text: Binding(
+                    get: { note ?? "" },
+                    set: { note = $0 }
+                ))
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(8)
+                .padding()
+            }
+            .navigationTitle("Add Note")
+            .navigationBarItems(
+                leading: Button("Cancel") {
+                    presentationMode.wrappedValue.dismiss()
+                },
+                trailing: Button("Save") {
+                    onSave()
+                    presentationMode.wrappedValue.dismiss()
+                }
+            )
         }
     }
 } 

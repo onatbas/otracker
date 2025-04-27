@@ -1898,7 +1898,10 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
             let entry = sortedEntries[indexPath.row]
             if let imageData = entry.image,
                let image = UIImage(data: imageData) {
-                let previewVC = ImagePreviewViewController(image: image)
+                print("\n=== Creating ImagePreviewViewController ===")
+                print("MeasurementEntry: \(entry.description)")
+                print("Note: \(entry.note ?? "nil")")
+                let previewVC = ImagePreviewViewController(image: image, measurementEntry: entry)
                 present(previewVC, animated: true)
             }
         }
@@ -1939,12 +1942,20 @@ extension UIColor {
 
 // MARK: - Image Preview View Controller
 class ImagePreviewViewController: UIViewController {
-    private let image: UIImage
+    private let imageView = UIImageView()
+    private let scrollView = UIScrollView()
+    private let noteButton = UIButton(type: .system)
+    private let noteLabel = UILabel()
+    private let noteContainer = UIView()
+    private var measurementEntry: MeasurementEntry?
     
-    init(image: UIImage) {
-        self.image = image
+    init(image: UIImage, measurementEntry: MeasurementEntry? = nil) {
         super.init(nibName: nil, bundle: nil)
-        modalPresentationStyle = .fullScreen
+        self.imageView.image = image
+        self.measurementEntry = measurementEntry
+        print("\n=== ImagePreviewViewController Init ===")
+        print("MeasurementEntry: \(measurementEntry?.description ?? "nil")")
+        print("Note: \(measurementEntry?.note ?? "nil")")
     }
     
     required init?(coder: NSCoder) {
@@ -1953,56 +1964,263 @@ class ImagePreviewViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        setupUI()
+    }
+    
+    private func setupUI() {
         view.backgroundColor = .black
         
-        let imageView = UIImageView(image: image)
+        // Setup scroll view
+        scrollView.delegate = self
+        scrollView.minimumZoomScale = 1.0
+        scrollView.maximumZoomScale = 3.0
+        view.addSubview(scrollView)
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        
+        // Setup image view
         imageView.contentMode = .scaleAspectFit
+        scrollView.addSubview(imageView)
         imageView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(imageView)
-        
         NSLayoutConstraint.activate([
-            imageView.topAnchor.constraint(equalTo: view.topAnchor),
-            imageView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            imageView.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            imageView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            imageView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
+            imageView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
+            imageView.heightAnchor.constraint(equalTo: scrollView.heightAnchor)
         ])
         
-        let closeButton = UIButton(type: .system)
-        closeButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
-        closeButton.tintColor = .white
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
-        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
-        view.addSubview(closeButton)
+        // Setup note button
+        noteButton.setImage(UIImage(systemName: "note.text"), for: .normal)
+        noteButton.tintColor = .white
+        noteButton.addTarget(self, action: #selector(noteButtonTapped), for: .touchUpInside)
+        view.addSubview(noteButton)
+        noteButton.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
-            closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            closeButton.widthAnchor.constraint(equalToConstant: 36),
-            closeButton.heightAnchor.constraint(equalToConstant: 36)
+            noteButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            noteButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16)
         ])
         
-        let shareButton = UIButton(type: .system)
-        shareButton.setImage(UIImage(systemName: "square.and.arrow.up"), for: .normal)
-        shareButton.tintColor = .white
-        shareButton.translatesAutoresizingMaskIntoConstraints = false
-        shareButton.addTarget(self, action: #selector(shareTapped), for: .touchUpInside)
-        view.addSubview(shareButton)
+        // Setup note container
+        noteContainer.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        view.addSubview(noteContainer)
+        noteContainer.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            shareButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
-            shareButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            shareButton.widthAnchor.constraint(equalToConstant: 36),
-            shareButton.heightAnchor.constraint(equalToConstant: 36)
+            noteContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            noteContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            noteContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            noteContainer.heightAnchor.constraint(equalToConstant: 100)
+        ])
+        
+        // Setup note label
+        noteLabel.textColor = .white
+        noteLabel.numberOfLines = 0
+        noteLabel.textAlignment = .center
+        noteLabel.font = .systemFont(ofSize: 16)
+        noteContainer.addSubview(noteLabel)
+        noteLabel.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            noteLabel.topAnchor.constraint(equalTo: noteContainer.topAnchor, constant: 8),
+            noteLabel.leadingAnchor.constraint(equalTo: noteContainer.leadingAnchor, constant: 16),
+            noteLabel.trailingAnchor.constraint(equalTo: noteContainer.trailingAnchor, constant: -16),
+            noteLabel.bottomAnchor.constraint(equalTo: noteContainer.bottomAnchor, constant: -8)
+        ])
+        
+        // Update note display if there's an existing note
+        print("\n=== Setting up Note Display ===")
+        print("MeasurementEntry: \(measurementEntry?.description ?? "nil")")
+        print("Note: \(measurementEntry?.note ?? "nil")")
+        if let note = measurementEntry?.note, !note.isEmpty {
+            print("Displaying note: \(note)")
+            noteLabel.text = note
+            noteContainer.isHidden = false
+        } else {
+            print("No note to display")
+            noteContainer.isHidden = true
+        }
+    }
+    
+    @objc private func noteButtonTapped() {
+        print("\n=== Note Button Tapped ===")
+        print("Current note: \(measurementEntry?.note ?? "nil")")
+        
+        let alert = UIAlertController(title: "Add Note", message: nil, preferredStyle: .alert)
+        alert.addTextField { textField in
+            textField.placeholder = "Enter your note here"
+            textField.text = self.measurementEntry?.note
+            print("Text field initialized with: \(textField.text ?? "nil")")
+        }
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
+            print("Note editing cancelled")
+        })
+        
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
+            guard let self = self,
+                  let entry = self.measurementEntry else {
+                print("Error: No measurement entry available")
+                return
+            }
+            
+            let note = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines)
+            print("Saving note: \(note ?? "nil")")
+            
+            entry.note = note
+            
+            do {
+                print("Attempting to save to Core Data...")
+                try entry.managedObjectContext?.save()
+                print("Successfully saved note to Core Data")
+                self.noteLabel.text = note
+                self.noteContainer.isHidden = note?.isEmpty ?? true
+                print("Note container visibility: \(!self.noteContainer.isHidden)")
+            } catch {
+                print("Error saving note: \(error)")
+            }
+        })
+        
+        present(alert, animated: true)
+    }
+}
+
+extension ImagePreviewViewController: UIScrollViewDelegate {
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+        return imageView
+    }
+}
+
+// Add ImageEditorViewController
+class ImageEditorViewController: UIViewController, UIScrollViewDelegate {
+    private let imageView = UIImageView()
+    private let scrollView = UIScrollView()
+    private let cancelButton = UIButton(type: .system)
+    private let doneButton = UIButton(type: .system)
+    private let filtersButton = UIButton(type: .system)
+    private let cropButton = UIButton(type: .system)
+    
+    weak var delegate: ImageEditorViewControllerDelegate?
+    private var originalImage: UIImage
+    
+    init(image: UIImage) {
+        self.originalImage = image
+        super.init(nibName: nil, bundle: nil)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupUI()
+    }
+    
+    private func setupUI() {
+        view.backgroundColor = .black
+        
+        // Setup scroll view
+        scrollView.delegate = self
+        scrollView.minimumZoomScale = 1.0
+        scrollView.maximumZoomScale = 3.0
+        view.addSubview(scrollView)
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        
+        // Setup image view
+        imageView.image = originalImage
+        imageView.contentMode = .scaleAspectFit
+        scrollView.addSubview(imageView)
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            imageView.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            imageView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            imageView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
+            imageView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
+            imageView.heightAnchor.constraint(equalTo: scrollView.heightAnchor)
+        ])
+        
+        // Setup cancel button
+        cancelButton.setTitle("Cancel", for: .normal)
+        cancelButton.tintColor = .white
+        cancelButton.addTarget(self, action: #selector(cancelButtonTapped), for: .touchUpInside)
+        view.addSubview(cancelButton)
+        cancelButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            cancelButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            cancelButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16)
+        ])
+        
+        // Setup done button
+        doneButton.setTitle("Done", for: .normal)
+        doneButton.tintColor = .white
+        doneButton.addTarget(self, action: #selector(doneButtonTapped), for: .touchUpInside)
+        view.addSubview(doneButton)
+        doneButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            doneButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            doneButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16)
+        ])
+        
+        // Setup filters button
+        filtersButton.setImage(UIImage(systemName: "camera.filters"), for: .normal)
+        filtersButton.tintColor = .white
+        filtersButton.addTarget(self, action: #selector(filtersButtonTapped), for: .touchUpInside)
+        view.addSubview(filtersButton)
+        filtersButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            filtersButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            filtersButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16)
+        ])
+        
+        // Setup crop button
+        cropButton.setImage(UIImage(systemName: "crop"), for: .normal)
+        cropButton.tintColor = .white
+        cropButton.addTarget(self, action: #selector(cropButtonTapped), for: .touchUpInside)
+        view.addSubview(cropButton)
+        cropButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            cropButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            cropButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16)
         ])
     }
     
-    @objc private func closeTapped() {
-        dismiss(animated: true)
+    @objc private func cancelButtonTapped() {
+        delegate?.imageEditorDidCancel(self)
     }
     
-    @objc private func shareTapped() {
-        let activityVC = UIActivityViewController(activityItems: [image], applicationActivities: nil)
-        activityVC.popoverPresentationController?.sourceView = self.view
-        present(activityVC, animated: true)
+    @objc private func doneButtonTapped() {
+        delegate?.imageEditor(self, didFinishEditing: imageView.image ?? originalImage)
     }
+    
+    @objc private func filtersButtonTapped() {
+        // TODO: Implement filters
+    }
+    
+    @objc private func cropButtonTapped() {
+        // TODO: Implement cropping
+    }
+    
+    // Add UIScrollViewDelegate conformance
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+        return imageView
+    }
+}
+
+protocol ImageEditorViewControllerDelegate: AnyObject {
+    func imageEditor(_ editor: ImageEditorViewController, didFinishEditing image: UIImage)
+    func imageEditorDidCancel(_ editor: ImageEditorViewController)
 }
 
 // MARK: - Add Measurement View Controller
