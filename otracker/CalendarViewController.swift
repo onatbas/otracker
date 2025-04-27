@@ -1,6 +1,7 @@
 import UIKit
 import FSCalendar
 import CoreData
+import HealthKit
 
 class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendarDelegate, FSCalendarDelegateAppearance, UITableViewDataSource, UITableViewDelegate {
     private var calendar: FSCalendar!
@@ -99,12 +100,18 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
         } catch {
             allMeasurementTypes = []
         }
+        
+        // Clear existing measurements
+        measurementsByDate = [:]
+        
+        // Fetch Core Data entries for non-HealthKit types
         let request: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
         do {
             let entries = try context.fetch(request)
-            measurementsByDate = [:]
             for entry in entries {
                 guard let timestamp = entry.timestamp, let type = entry.type, let colorHex = type.color else { continue }
+                // Skip HealthKit-linked types
+                if type.healthKitIdentifier != nil { continue }
                 let day = dateFormatter.date(from: dateFormatter.string(from: timestamp))!
                 let color = UIColor(hex: colorHex)
                 if measurementsByDate[day] != nil {
@@ -113,9 +120,56 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
                     measurementsByDate[day] = [(color, entry)]
                 }
             }
-            calendar.reloadData()
         } catch {
             print("Error fetching measurements: \(error)")
+        }
+        
+        // Fetch HealthKit data for linked types
+        let group = DispatchGroup()
+        for type in allMeasurementTypes {
+            if let hkIdStr = type.healthKitIdentifier {
+                let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
+                group.enter()
+                HealthKitManager.shared.fetchAllQuantitySamples(for: hkId) { [weak self] samples in
+                    defer { group.leave() }
+                    guard let self = self else { return }
+                    DispatchQueue.main.async {
+                        for sample in samples {
+                            let day = self.dateFormatter.date(from: self.dateFormatter.string(from: sample.endDate))!
+                            if let colorHex = type.color {
+                                let color = UIColor(hex: colorHex)
+                                // Create a temporary MeasurementEntry for display purposes only
+                                let entry = MeasurementEntry(context: self.context)
+                                entry.timestamp = sample.endDate
+                                entry.type = type
+                                
+                                // Convert the sample value to the appropriate unit
+                                let value: Double
+                                switch hkId {
+                                case .bodyMass: value = sample.quantity.doubleValue(for: .gramUnit(with: .kilo))
+                                case .height: value = sample.quantity.doubleValue(for: .meter())
+                                case .bodyFatPercentage: value = sample.quantity.doubleValue(for: .percent())
+                                case .bodyMassIndex: value = sample.quantity.doubleValue(for: .count())
+                                case .stepCount: value = sample.quantity.doubleValue(for: .count())
+                                case .heartRate: value = sample.quantity.doubleValue(for: HKUnit(from: "count/min"))
+                                case .activeEnergyBurned, .basalEnergyBurned: value = sample.quantity.doubleValue(for: .kilocalorie())
+                                default: value = sample.quantity.doubleValue(for: .count())
+                                }
+                                entry.value = value
+                                
+                                if self.measurementsByDate[day] != nil {
+                                    self.measurementsByDate[day]?.append((color, entry))
+                                } else {
+                                    self.measurementsByDate[day] = [(color, entry)]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        group.notify(queue: .main) { [weak self] in
+            self?.calendar.reloadData()
         }
     }
     
@@ -127,20 +181,31 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
         for type in allMeasurementTypes where type.isFormula {
             guard let dependencies = type.dependencies?.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }),
                   let formula = type.formula else { continue }
-            // Gather dependency values for this day
-            var values: [String: Double] = [:]
+            
+            // Gather all entries for dependencies
+            var depEntries: [String: [MeasurementEntry]] = [:]
             for depName in dependencies {
                 if let depType = allMeasurementTypes.first(where: { $0.name == depName }),
-                   let depEntries = depType.entries as? Set<MeasurementEntry>,
-                   let depEntry = depEntries.first(where: { entry in
-                        let entryDay = dateFormatter.date(from: dateFormatter.string(from: entry.timestamp ?? Date()))
-                        return entryDay == day
-                   }) {
-                    values[depName] = depEntry.value
+                   let entries = depType.entries as? Set<MeasurementEntry> {
+                    depEntries[depName] = entries.sorted { ($0.timestamp ?? Date.distantPast) < ($1.timestamp ?? Date.distantPast) }
                 }
             }
+            
+            // Find the most recent values for each dependency up to this day
+            var values: [String: Double] = [:]
+            for (depName, entries) in depEntries {
+                if let mostRecentEntry = entries.last(where: { 
+                    if let entryDate = $0.timestamp {
+                        return Calendar.current.startOfDay(for: entryDate) <= day
+                    }
+                    return false
+                }) {
+                    values[depName] = mostRecentEntry.value
+                }
+            }
+            
             if values.count == dependencies.count {
-                // All dependencies present for this day
+                // All dependencies present
                 let expr = NSExpression(format: formula)
                 let result = expr.expressionValue(with: values, context: nil) as? Double ?? 0.0
                 formulaResults.append(FormulaResult(type: type, value: result, date: day))

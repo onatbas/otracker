@@ -2,6 +2,7 @@ import SwiftUI
 import Charts
 import CoreData
 import DGCharts
+import HealthKit
 
 struct GraphTabView: View {
     @Environment(\.managedObjectContext) private var context
@@ -21,22 +22,32 @@ struct GraphTabView: View {
                   let context = type.managedObjectContext else {
                 return type.unit ?? ""
             }
-            var dayToValues: [String: [String: Double]] = [:]
+            
+            // Gather all entries for dependencies
+            var depEntries: [String: [MeasurementEntry]] = [:]
             for depName in dependencies {
                 let fetch: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
                 fetch.predicate = NSPredicate(format: "name == %@", depName)
                 if let depType = try? context.fetch(fetch).first, let entries = depType.entries as? Set<MeasurementEntry> {
-                    for entry in entries {
-                        if let date = entry.timestamp {
-                            let day = Calendar.current.startOfDay(for: date)
-                            let dayStr = ISO8601DateFormatter().string(from: day)
-                            dayToValues[dayStr, default: [:]][depName] = entry.value
-                        }
-                    }
+                    depEntries[depName] = entries.sorted { ($0.timestamp ?? Date.distantPast) < ($1.timestamp ?? Date.distantPast) }
                 }
             }
-            let validDays = dayToValues.filter { $0.value.keys.count == dependencies.count }
-            if let (_, values) = validDays.sorted(by: { $0.key > $1.key }).first {
+            
+            // Find the most recent values for each dependency up to today
+            var values: [String: Double] = [:]
+            let today = Calendar.current.startOfDay(for: Date())
+            for (depName, entries) in depEntries {
+                if let mostRecentEntry = entries.last(where: { 
+                    if let entryDate = $0.timestamp {
+                        return Calendar.current.startOfDay(for: entryDate) <= today
+                    }
+                    return false
+                }) {
+                    values[depName] = mostRecentEntry.value
+                }
+            }
+            
+            if values.count == dependencies.count {
                 let expr = NSExpression(format: formula)
                 let result = expr.expressionValue(with: values, context: nil) as? Double ?? 0.0
                 return "\(result.clean) \(type.unit ?? "")"
@@ -56,7 +67,13 @@ struct GraphTabView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                if let type = selectedType ?? measurementTypes.first {
+                // Show all HealthKit-linked categories, even if no entries
+                let allTypes: [MeasurementType] = {
+                    let coreDataTypes = Array(measurementTypes)
+                    // If you want to add more types, do it here (e.g., stub for HealthKit-only)
+                    return coreDataTypes
+                }()
+                if let type = selectedType ?? allTypes.first {
                     if type.unit == "Picture" {
                         PictureGalleryView(type: type)
                             .frame(height: 220)
@@ -70,7 +87,7 @@ struct GraphTabView: View {
                 }
                 Divider()
                 List(selection: $selectedType) {
-                    ForEach(measurementTypes, id: \..self) { type in
+                    ForEach(allTypes, id: \..self) { type in
                         HStack {
                             if let colorHex = type.color {
                                 Circle()
@@ -101,6 +118,14 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
     let type: MeasurementType
     @Environment(\.managedObjectContext) private var context
     
+    class Coordinator {
+        var healthKitSamples: [HKQuantitySample] = []
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+    
     func makeUIView(context: Context) -> LineChartView {
         let chartView = LineChartView()
         chartView.rightAxis.enabled = false
@@ -117,24 +142,82 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: LineChartView, context: Context) {
-        if type.isFormula, let dependencies = type.dependencies?.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }), let formula = type.formula, let moc = type.managedObjectContext {
+        if let hkIdStr = type.healthKitIdentifier {
+            let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
+            HealthKitManager.shared.fetchAllQuantitySamples(for: hkId) { samples in
+                DispatchQueue.main.async {
+                    context.coordinator.healthKitSamples = samples
+                    let sorted = samples.sorted { $0.endDate < $1.endDate }
+                    let chartEntries = sorted.enumerated().map { (idx, sample) -> ChartDataEntry in
+                        // Use kg for body mass, meters for height, etc.
+                        let value: Double
+                        switch hkId {
+                        case .bodyMass: value = sample.quantity.doubleValue(for: .gramUnit(with: .kilo))
+                        case .height: value = sample.quantity.doubleValue(for: .meter())
+                        case .bodyFatPercentage: value = sample.quantity.doubleValue(for: .percent())
+                        case .bodyMassIndex: value = sample.quantity.doubleValue(for: .count())
+                        case .stepCount: value = sample.quantity.doubleValue(for: .count())
+                        case .heartRate: value = sample.quantity.doubleValue(for: HKUnit(from: "count/min"))
+                        case .activeEnergyBurned, .basalEnergyBurned: value = sample.quantity.doubleValue(for: .kilocalorie())
+                        default: value = sample.quantity.doubleValue(for: .count())
+                        }
+                        return ChartDataEntry(x: Double(idx), y: value)
+                    }
+                    if chartEntries.isEmpty {
+                        uiView.data = nil
+                        uiView.noDataText = "No data"
+                    } else {
+                        let dataSet = LineChartDataSet(entries: chartEntries, label: type.name ?? "")
+                        dataSet.colors = [NSUIColor.systemBlue]
+                        dataSet.circleColors = [NSUIColor.systemBlue]
+                        dataSet.circleRadius = 4
+                        dataSet.drawValuesEnabled = false
+                        dataSet.lineWidth = 2
+                        dataSet.mode = LineChartDataSet.Mode.cubicBezier
+                        let data = LineChartData(dataSet: dataSet)
+                        uiView.data = data
+                    }
+                }
+            }
+        } else if type.isFormula, let dependencies = type.dependencies?.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }), let formula = type.formula, let moc = type.managedObjectContext {
             // Gather all entries for dependencies
-            var dayToValues: [String: [String: Double]] = [:]
-            var dayToDate: [String: Date] = [:]
+            var depEntries: [String: [MeasurementEntry]] = [:]
             for depName in dependencies {
                 let fetch: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
                 fetch.predicate = NSPredicate(format: "name == %@", depName)
                 if let depType = try? moc.fetch(fetch).first, let entries = depType.entries as? Set<MeasurementEntry> {
-                    for entry in entries {
-                        if let date = entry.timestamp {
-                            let day = Calendar.current.startOfDay(for: date)
-                            let dayStr = ISO8601DateFormatter().string(from: day)
-                            dayToValues[dayStr, default: [:]][depName] = entry.value
-                            dayToDate[dayStr] = day
+                    depEntries[depName] = entries.sorted { ($0.timestamp ?? Date.distantPast) < ($1.timestamp ?? Date.distantPast) }
+                }
+            }
+            
+            // For each day where we have a measurement, find the most recent values for each dependency
+            var dayToValues: [String: [String: Double]] = [:]
+            var dayToDate: [String: Date] = [:]
+            for (depName, entries) in depEntries {
+                for entry in entries {
+                    if let date = entry.timestamp {
+                        let day = Calendar.current.startOfDay(for: date)
+                        let dayStr = ISO8601DateFormatter().string(from: day)
+                        // For each dependency, find the most recent value up to this day
+                        for (otherDepName, otherEntries) in depEntries {
+                            if otherDepName != depName {
+                                if let mostRecentEntry = otherEntries.last(where: { 
+                                    if let otherDate = $0.timestamp {
+                                        return Calendar.current.startOfDay(for: otherDate) <= day
+                                    }
+                                    return false
+                                }) {
+                                    dayToValues[dayStr, default: [:]][otherDepName] = mostRecentEntry.value
+                                }
+                            }
                         }
+                        // Add the current entry's value
+                        dayToValues[dayStr, default: [:]][depName] = entry.value
+                        dayToDate[dayStr] = day
                     }
                 }
             }
+            
             let validDays = dayToValues.filter { $0.value.keys.count == dependencies.count }
             let sortedDays = validDays.keys.sorted()
             let chartEntries: [ChartDataEntry] = sortedDays.enumerated().map { (idx, dayStr) in
@@ -152,16 +235,6 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
             dataSet.mode = LineChartDataSet.Mode.cubicBezier
             let data = LineChartData(dataSet: dataSet)
             uiView.data = data
-            uiView.xAxis.valueFormatter = IndexAxisValueFormatter(values: sortedDays.compactMap { dayStr in
-                if let date = dayToDate[dayStr] {
-                    let formatter = DateFormatter()
-                    formatter.dateStyle = .short
-                    return formatter.string(from: date)
-                }
-                return ""
-            })
-            uiView.xAxis.granularity = 1
-            uiView.notifyDataSetChanged()
         } else {
             let request: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
             request.predicate = NSPredicate(format: "type == %@", type)
@@ -185,16 +258,6 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
             dataSet.mode = LineChartDataSet.Mode.cubicBezier
             let data = LineChartData(dataSet: dataSet)
             uiView.data = data
-            uiView.xAxis.valueFormatter = IndexAxisValueFormatter(values: sorted.compactMap { entry in
-                if let date = entry.timestamp {
-                    let formatter = DateFormatter()
-                    formatter.dateStyle = .short
-                    return formatter.string(from: date)
-                }
-                return ""
-            })
-            uiView.xAxis.granularity = 1
-            uiView.notifyDataSetChanged()
         }
     }
 }

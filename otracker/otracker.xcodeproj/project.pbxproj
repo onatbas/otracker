@@ -1,3 +1,0 @@
-// This is a minimal Xcode project.pbxproj for an iOS app named 'otracker' with Swift, Core Data, and SPM dependencies (DGCharts, FSCalendar). No references to DGChartsDynamic.
-// You will need to open the project in Xcode and re-add SPM dependencies via File > Add Packages if needed.
-// ... minimal project file content ... 

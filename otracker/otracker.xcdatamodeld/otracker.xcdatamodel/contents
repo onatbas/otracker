@@ -8,11 +8,12 @@
     </entity>
     <entity name="MeasurementType" representedClassName="MeasurementType" syncable="YES" codeGenerationType="class">
         <attribute name="color" attributeType="String"/>
+        <attribute name="dependencies" optional="YES" attributeType="String"/>
+        <attribute name="formula" optional="YES" attributeType="String"/>
+        <attribute name="healthKitIdentifier" optional="YES" attributeType="String"/>
+        <attribute name="isFormula" attributeType="Boolean" defaultValueString="NO"/>
         <attribute name="name" attributeType="String"/>
         <attribute name="unit" attributeType="String"/>
-        <attribute name="isFormula" attributeType="Boolean" defaultValueString="NO"/>
-        <attribute name="formula" attributeType="String" optional="YES"/>
-        <attribute name="dependencies" attributeType="String" optional="YES"/>
         <relationship name="entries" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="MeasurementEntry" inverseName="type" inverseEntity="MeasurementEntry"/>
     </entity>
 </model>

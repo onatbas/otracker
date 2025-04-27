@@ -9,6 +9,7 @@ import UIKit
 import CoreData
 import Charts
 import SwiftUI
+import HealthKit
 
 class MainTabBarController: UITabBarController {
     override func viewDidLoad() {
@@ -35,7 +36,7 @@ class MainTabBarController: UITabBarController {
     }
 }
 
-class AddCategoryViewController: UIViewController, UITextFieldDelegate {
+class AddCategoryViewController: UIViewController, UITextFieldDelegate, UIPickerViewDataSource, UIPickerViewDelegate {
     private let nameTextField = UITextField()
     private let unitTextField = UITextField()
     private let unitOptions = ["cm", "ft", "kg", "lb", "%", "in", "min", "#", "Picture", "Custom"]
@@ -56,7 +57,23 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
     ]
     private var colorButtons: [UIButton] = []
     private var selectedColor: UIColor
-    private let completion: (String, String, UIColor, Bool, String?, String?) -> Void
+    private let healthKitTypes: [(name: String, identifier: String?)] = [
+        ("None", nil),
+        ("Weight (kg)", "HKQuantityTypeIdentifierBodyMass"),
+        ("Height (m)", "HKQuantityTypeIdentifierHeight"),
+        ("Body Fat %", "HKQuantityTypeIdentifierBodyFatPercentage"),
+        ("BMI", "HKQuantityTypeIdentifierBodyMassIndex"),
+        ("Steps", "HKQuantityTypeIdentifierStepCount"),
+        ("Heart Rate", "HKQuantityTypeIdentifierHeartRate"),
+        ("Active Energy (kcal)", "HKQuantityTypeIdentifierActiveEnergyBurned"),
+        ("Resting Energy (kcal)", "HKQuantityTypeIdentifierBasalEnergyBurned")
+    ]
+    private var selectedHealthKitTypeIndex: Int = 0
+    private let healthKitPicker = UIPickerView()
+    private let healthKitLabel = UILabel()
+    private let linkHealthButton = UIButton(type: .system)
+    private var healthKitPickerVisible = false
+    private let completion: (String, String, UIColor, Bool, String?, String?, String?) -> Void
     private let formulaSwitch = UISwitch()
     private let formulaLabel = UILabel()
     private let formulaTextField = UITextField()
@@ -64,8 +81,8 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
     private var isFormula: Bool = false
     private var formula: String? = nil
     private var dependencies: String? = nil
-    
-    init(completion: @escaping (String, String, UIColor, Bool, String?, String?) -> Void) {
+
+    init(completion: @escaping (String, String, UIColor, Bool, String?, String?, String?) -> Void) {
         self.completion = completion
         self.selectedColor = UIColor(red: 0.91, green: 0.30, blue: 0.32, alpha: 1.0) // default to first color
         super.init(nibName: nil, bundle: nil)
@@ -82,6 +99,10 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
         unitTextField.delegate = self
         formulaTextField.delegate = self
         dependenciesTextField.delegate = self
+        healthKitPicker.dataSource = self
+        healthKitPicker.delegate = self
+        // Add Done button to navigation bar
+        navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(saveButtonTapped))
     }
     
     private func setupUI() {
@@ -185,6 +206,21 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
             colorGridStack.addArrangedSubview(rowStack)
         }
         
+        // HealthKit link button
+        linkHealthButton.setTitle("Link with Health Data", for: .normal)
+        linkHealthButton.setTitleColor(.systemBlue, for: .normal)
+        linkHealthButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
+        linkHealthButton.translatesAutoresizingMaskIntoConstraints = false
+        linkHealthButton.addTarget(self, action: #selector(linkHealthTapped), for: .touchUpInside)
+        
+        // HealthKit picker and label (hidden by default)
+        healthKitLabel.text = "Apple Health Data Type (optional)"
+        healthKitLabel.font = .systemFont(ofSize: 16, weight: .medium)
+        healthKitLabel.translatesAutoresizingMaskIntoConstraints = false
+        healthKitLabel.isHidden = true
+        healthKitPicker.translatesAutoresizingMaskIntoConstraints = false
+        healthKitPicker.isHidden = true
+        
         formulaLabel.text = "Formula"
         formulaLabel.font = .systemFont(ofSize: 18, weight: .medium)
         formulaLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -210,6 +246,9 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
         view.addSubview(unitGridStack)
         view.addSubview(unitTextField)
         view.addSubview(colorGridStack)
+        view.addSubview(linkHealthButton)
+        view.addSubview(healthKitLabel)
+        view.addSubview(healthKitPicker)
         view.addSubview(formulaLabel)
         view.addSubview(formulaSwitch)
         view.addSubview(formulaTextField)
@@ -233,7 +272,17 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
             colorGridStack.topAnchor.constraint(equalTo: unitTextField.bottomAnchor, constant: 24),
             colorGridStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             
-            formulaLabel.topAnchor.constraint(equalTo: colorGridStack.bottomAnchor, constant: 24),
+            linkHealthButton.topAnchor.constraint(equalTo: colorGridStack.bottomAnchor, constant: 24),
+            linkHealthButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            
+            healthKitLabel.topAnchor.constraint(equalTo: linkHealthButton.bottomAnchor, constant: 12),
+            healthKitLabel.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            healthKitPicker.topAnchor.constraint(equalTo: healthKitLabel.bottomAnchor, constant: 8),
+            healthKitPicker.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            healthKitPicker.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
+            healthKitPicker.heightAnchor.constraint(equalToConstant: 100),
+            
+            formulaLabel.topAnchor.constraint(equalTo: healthKitPicker.bottomAnchor, constant: 24),
             formulaLabel.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
             formulaSwitch.centerYAnchor.constraint(equalTo: formulaLabel.centerYAnchor),
             formulaSwitch.leadingAnchor.constraint(equalTo: formulaLabel.trailingAnchor, constant: 12),
@@ -251,6 +300,12 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
             saveButton.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
             saveButton.heightAnchor.constraint(equalToConstant: 44)
         ])
+    }
+    
+    @objc private func linkHealthTapped() {
+        healthKitPickerVisible.toggle()
+        healthKitLabel.isHidden = !healthKitPickerVisible
+        healthKitPicker.isHidden = !healthKitPickerVisible
     }
     
     @objc private func unitSelected(_ sender: UIButton) {
@@ -304,7 +359,8 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
         let isFormulaType = formulaSwitch.isOn
         let formulaStr = isFormulaType ? formulaTextField.text : nil
         let dependenciesStr = isFormulaType ? dependenciesTextField.text : nil
-        completion(name, unit, selectedColor, isFormulaType, formulaStr, dependenciesStr)
+        let healthKitIdentifier = healthKitPickerVisible ? healthKitTypes[selectedHealthKitTypeIndex].identifier : nil
+        completion(name, unit, selectedColor, isFormulaType, formulaStr, dependenciesStr, healthKitIdentifier)
         dismiss(animated: true)
     }
     
@@ -314,7 +370,25 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate {
     
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         textField.resignFirstResponder()
-        return false
+        return false;
+    }
+    
+    // MARK: - UIPickerViewDataSource
+    func numberOfComponents(in pickerView: UIPickerView) -> Int {
+        return 1
+    }
+    
+    func pickerView(_ pickerView: UIPickerView, numberOfRowsInComponent component: Int) -> Int {
+        return healthKitTypes.count
+    }
+    
+    // MARK: - UIPickerViewDelegate
+    func pickerView(_ pickerView: UIPickerView, titleForRow row: Int, forComponent component: Int) -> String? {
+        return healthKitTypes[row].name
+    }
+    
+    func pickerView(_ pickerView: UIPickerView, didSelectRow row: Int, inComponent component: Int) {
+        selectedHealthKitTypeIndex = row
     }
 }
 
@@ -372,7 +446,7 @@ class CategoriesViewController: UIViewController {
     }
     
     @objc private func addCategory() {
-        let addCategoryVC = AddCategoryViewController { [weak self] name, unit, color, isFormula, formula, dependencies in
+        let addCategoryVC = AddCategoryViewController { [weak self] name, unit, color, isFormula, formula, dependencies, healthKitIdentifier in
             let measurementType = MeasurementType(context: self!.context)
             measurementType.name = name
             measurementType.unit = unit
@@ -380,6 +454,7 @@ class CategoriesViewController: UIViewController {
             measurementType.isFormula = isFormula
             measurementType.formula = formula
             measurementType.dependencies = dependencies
+            measurementType.healthKitIdentifier = healthKitIdentifier
             do {
                 try self?.context.save()
                 self?.loadMeasurementTypes()
@@ -455,6 +530,11 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
     private let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
     private var expandedSections: Set<Int> = []
     private var imagePickerCompletion: ((UIImage) -> Void)?
+    // HealthKit cache: section index -> [HKQuantitySample]
+    private var healthKitSamplesBySection: [Int: [HKQuantitySample]] = [:]
+    private var healthKitAuthRequested = false
+    private let healthKitManager = HealthKitManager.shared
+    private var formulaValuesBySection: [Int: [Date: [String: Double]]] = [:]
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -520,16 +600,38 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
         } else {
             let addVC = AddMeasurementViewController(type: type) { [weak self] value, date in
                 guard let self = self else { return }
-                let entry = MeasurementEntry(context: self.context)
-                entry.value = value
-                entry.timestamp = date
-                entry.type = type
-                do {
-                    try self.context.save()
+                
+                if let hkIdStr = type.healthKitIdentifier {
+                    // Save to HealthKit only
+                    let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
+                    // Determine the correct HKUnit for the type
+                    let unit: HKUnit
+                    switch hkId {
+                    case .bodyMass: unit = .gramUnit(with: .kilo)
+                    case .height: unit = .meter()
+                    case .bodyFatPercentage: unit = .percent()
+                    case .bodyMassIndex: unit = .count()
+                    case .stepCount: unit = .count()
+                    case .heartRate: unit = HKUnit(from: "count/min")
+                    case .activeEnergyBurned, .basalEnergyBurned: unit = .kilocalorie()
+                    default: unit = .count()
+                    }
+                    HealthKitManager.shared.saveQuantitySample(identifier: hkId, value: value, unit: unit, date: date)
                     self.tableView.reloadData()
                     NotificationCenter.default.post(name: .measurementAdded, object: nil)
-                } catch {
-                    print("Error saving measurement entry: \(error)")
+                } else {
+                    // Save to Core Data only
+                    let entry = MeasurementEntry(context: self.context)
+                    entry.value = value
+                    entry.timestamp = date
+                    entry.type = type
+                    do {
+                        try self.context.save()
+                        self.tableView.reloadData()
+                        NotificationCenter.default.post(name: .measurementAdded, object: nil)
+                    } catch {
+                        print("Error saving measurement entry: \(error)")
+                    }
                 }
             }
             let nav = UINavigationController(rootViewController: addVC)
@@ -577,10 +679,397 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
     private func toggleSection(_ section: Int) {
         if expandedSections.contains(section) {
             expandedSections.remove(section)
+            tableView.reloadSections(IndexSet(integer: section), with: .automatic)
         } else {
             expandedSections.insert(section)
+            // If this section is linked to HealthKit, fetch samples
+            let type = measurementTypes[section]
+            print("\n=== Expanding Section: \(type.name ?? "Unknown") ===")
+            print("Type Details:")
+            print("- Unit: \(type.unit ?? "None")")
+            print("- HealthKit ID: \(type.healthKitIdentifier ?? "None")")
+            print("- Is Formula: \(type.isFormula)")
+            if type.isFormula {
+                print("- Formula: \(type.formula ?? "None")")
+                print("- Dependencies: \(type.dependencies ?? "None")")
+            }
+            
+            // Log Core Data entries
+            if let entries = type.entries?.allObjects as? [MeasurementEntry] {
+                print("\nCore Data Entries (\(entries.count)):")
+                let sortedEntries = entries.sorted { ($0.timestamp ?? Date.distantPast) > ($1.timestamp ?? Date.distantPast) }
+                for (index, entry) in sortedEntries.enumerated() {
+                    print("Entry \(index + 1):")
+                    print("- Value: \(entry.value)")
+                    print("- Timestamp: \(entry.timestamp?.description ?? "None")")
+                    if type.unit == "Picture" {
+                        print("- Has Image: \(entry.image != nil)")
+                    }
+                }
+            } else {
+                print("\nNo Core Data entries found")
+            }
+            
+            // Log HealthKit data if applicable
+            if let hkIdStr = type.healthKitIdentifier {
+                let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
+                print("\nFetching HealthKit data for: \(hkIdStr)")
+                requestHealthKitAndFetch(for: hkId, section: section)
+            }
+            
+            // Calculate formula values if applicable
+            if type.isFormula {
+                print("\nFormula Values:")
+                if let dependencies = type.dependencies?.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }),
+                   let formula = type.formula {
+                    print("- Dependencies: \(dependencies)")
+                    print("- Formula: \(formula)")
+                    
+                    // Gather all entries for dependencies
+                    var depEntries: [String: [MeasurementEntry]] = [:]
+                    for depName in dependencies {
+                        if let depType = measurementTypes.first(where: { $0.name == depName }),
+                           let entries = depType.entries?.allObjects as? [MeasurementEntry] {
+                            depEntries[depName] = entries.sorted { ($0.timestamp ?? Date.distantPast) < ($1.timestamp ?? Date.distantPast) }
+                            print("\nFound \(entries.count) entries for \(depName):")
+                            for entry in entries {
+                                if let date = entry.timestamp {
+                                    print("- \(date): \(entry.value)")
+                                }
+                            }
+                        } else {
+                            print("No entries found for dependency: \(depName)")
+                        }
+                    }
+                    
+                    // For each day where we have a measurement, find the most recent values for each dependency
+                    var dayToValues: [Date: [String: Double]] = [:]
+                    for (depName, entries) in depEntries {
+                        for entry in entries {
+                            if let date = entry.timestamp {
+                                let day = Calendar.current.startOfDay(for: date)
+                                // For each dependency, find the most recent value up to this day
+                                for (otherDepName, otherEntries) in depEntries {
+                                    if otherDepName != depName {
+                                        if let mostRecentEntry = otherEntries.last(where: { 
+                                            if let otherDate = $0.timestamp {
+                                                return Calendar.current.startOfDay(for: otherDate) <= day
+                                            }
+                                            return false
+                                        }) {
+                                            dayToValues[day, default: [:]][otherDepName] = mostRecentEntry.value
+                                        }
+                                    }
+                                }
+                                // Add the current entry's value
+                                dayToValues[day, default: [:]][depName] = entry.value
+                            }
+                        }
+                    }
+                    
+                    // Only include days where we have all dependencies
+                    let validDays = dayToValues.filter { $0.value.keys.count == dependencies.count }
+                    formulaValuesBySection[section] = validDays
+                    
+                    print("\nValid days with all dependencies: \(validDays.count)")
+                    for (day, values) in validDays {
+                        let result = evaluateFormula(formula, values: values)
+                        print("- \(day): \(result) (values: \(values))")
+                    }
+                }
+            }
+            
+            tableView.reloadSections(IndexSet(integer: section), with: .automatic)
         }
-        tableView.reloadSections(IndexSet(integer: section), with: .automatic)
+    }
+    
+    private func requestHealthKitAndFetch(for identifier: HKQuantityTypeIdentifier, section: Int) {
+        let typesToRead: Set<HKObjectType> = [HKObjectType.quantityType(forIdentifier: identifier)!]
+        if !healthKitAuthRequested {
+            let typesToShare: Set<HKSampleType> = [HKObjectType.quantityType(forIdentifier: identifier)!]
+            HealthKitManager.shared.requestAuthorization(toShare: typesToShare, read: typesToRead) { [weak self] success, error in
+                DispatchQueue.main.async {
+                    self?.healthKitAuthRequested = true
+                    if success {
+                        self?.fetchHealthKitSamples(for: identifier, section: section)
+                    }
+                }
+            }
+        } else {
+            fetchHealthKitSamples(for: identifier, section: section)
+        }
+    }
+    
+    private func fetchHealthKitSamples(for identifier: HKQuantityTypeIdentifier, section: Int) {
+        print("\n=== Fetching HealthKit Samples ===")
+        print("Type: \(identifier.rawValue)")
+        print("Section: \(section)")
+        
+        HealthKitManager.shared.fetchAllQuantitySamples(for: identifier) { [weak self] samples in
+            DispatchQueue.main.async {
+                print("\nHealthKit Samples Received:")
+                print("Total samples: \(samples.count)")
+                
+                // Log sample details
+                for (index, sample) in samples.enumerated() {
+                    print("Sample \(index + 1):")
+                    print("- Value: \(sample.quantity.doubleValue)")
+                    print("- Date: \(sample.endDate)")
+                }
+                
+                self?.healthKitSamplesBySection[section] = samples
+                
+                // Check if we need to import to Core Data
+                let type = self?.measurementTypes[section]
+                if let type = type {
+                    print("\n=== Core Data Analysis ===")
+                    print("Measurement Type: \(type.name ?? "Unknown")")
+                    
+                    // First, let's see what's in Core Data
+                    let request: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
+                    request.predicate = NSPredicate(format: "type == %@", type)
+                    do {
+                        let entries = try self?.context.fetch(request) ?? []
+                        print("\nCore Data Entries:")
+                        print("Total entries: \(entries.count)")
+                        
+                        // Group entries by day to see duplicates
+                        var entriesByDay: [String: [MeasurementEntry]] = [:]
+                        let dateFormatter = DateFormatter()
+                        dateFormatter.dateFormat = "yyyy-MM-dd"
+                        
+                        for entry in entries {
+                            if let date = entry.timestamp {
+                                let dayString = dateFormatter.string(from: date)
+                                entriesByDay[dayString, default: []].append(entry)
+                            }
+                        }
+                        
+                        // Log entries with duplicates
+                        print("\nEntries by day:")
+                        for (day, dayEntries) in entriesByDay {
+                            if dayEntries.count > 1 {
+                                print("Day \(day) has \(dayEntries.count) entries:")
+                                for entry in dayEntries {
+                                    print("- Value: \(entry.value), Timestamp: \(entry.timestamp?.description ?? "nil")")
+                                }
+                            }
+                        }
+                        
+                        // Now check HealthKit samples
+                        print("\nHealthKit Samples Analysis:")
+                        var samplesByDay: [String: [HKQuantitySample]] = [:]
+                        for sample in samples {
+                            let dayString = dateFormatter.string(from: sample.endDate)
+                            samplesByDay[dayString, default: []].append(sample)
+                        }
+                        
+                        print("\nSamples by day:")
+                        for (day, daySamples) in samplesByDay {
+                            if daySamples.count > 1 {
+                                print("Day \(day) has \(daySamples.count) samples:")
+                                for sample in daySamples {
+                                    print("- Value: \(sample.quantity.doubleValue), Date: \(sample.endDate)")
+                                }
+                            }
+                        }
+                        
+                    } catch {
+                        print("Error fetching Core Data entries: \(error)")
+                    }
+                }
+                
+                self?.tableView.reloadSections(IndexSet(integer: section), with: .automatic)
+            }
+        }
+    }
+    
+    private func evaluateFormula(_ formula: String, values: [String: Double]) -> Double {
+        // Simple formula evaluation - supports basic arithmetic
+        // Replace variable names with their values
+        var evaluatedFormula = formula
+        for (name, value) in values {
+            evaluatedFormula = evaluatedFormula.replacingOccurrences(of: name, with: "\(value)")
+        }
+        
+        // Use NSExpression for safe evaluation
+        let expression = NSExpression(format: evaluatedFormula)
+        return (expression.expressionValue(with: nil, context: nil) as? Double) ?? 0.0
+    }
+    
+    private func evaluateFormula(_ formula: String, with values: [String: Double]) throws -> Double {
+        return evaluateFormula(formula, values: values)
+    }
+    
+    private func identifyAndCleanDuplicates() {
+        let request: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
+        do {
+            let entries = try context.fetch(request)
+            
+            // Group entries by type and date
+            var entriesByTypeAndDate: [String: [String: [MeasurementEntry]]] = [:]
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd"
+            
+            for entry in entries {
+                guard let type = entry.type,
+                      let typeName = type.name,
+                      let timestamp = entry.timestamp else { continue }
+                
+                let dateString = dateFormatter.string(from: timestamp)
+                if entriesByTypeAndDate[typeName] == nil {
+                    entriesByTypeAndDate[typeName] = [:]
+                }
+                if entriesByTypeAndDate[typeName]![dateString] == nil {
+                    entriesByTypeAndDate[typeName]![dateString] = []
+                }
+                entriesByTypeAndDate[typeName]![dateString]!.append(entry)
+            }
+            
+            // Identify duplicates
+            var duplicatesFound = false
+            for (typeName, dates) in entriesByTypeAndDate {
+                for (date, entries) in dates {
+                    if entries.count > 1 {
+                        duplicatesFound = true
+                        print("\nFound \(entries.count) entries for \(typeName) on \(date):")
+                        for entry in entries {
+                            print("- Value: \(entry.value), Timestamp: \(entry.timestamp?.description ?? "nil")")
+                        }
+                    }
+                }
+            }
+            
+            if !duplicatesFound {
+                print("No duplicate entries found.")
+            }
+            
+        } catch {
+            print("Error fetching entries: \(error)")
+        }
+    }
+    
+    private func cleanupDuplicates() {
+        let request: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
+        do {
+            let entries = try context.fetch(request)
+            
+            // Group entries by type and date
+            var entriesByTypeAndDate: [String: [String: [MeasurementEntry]]] = [:]
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd"
+            
+            for entry in entries {
+                guard let type = entry.type,
+                      let typeName = type.name,
+                      let timestamp = entry.timestamp else { continue }
+                
+                let dateString = dateFormatter.string(from: timestamp)
+                if entriesByTypeAndDate[typeName] == nil {
+                    entriesByTypeAndDate[typeName] = [:]
+                }
+                if entriesByTypeAndDate[typeName]![dateString] == nil {
+                    entriesByTypeAndDate[typeName]![dateString] = []
+                }
+                entriesByTypeAndDate[typeName]![dateString]!.append(entry)
+            }
+            
+            // Clean up duplicates by keeping only the most recent entry for each type and date
+            var entriesDeleted = 0
+            for (_, dates) in entriesByTypeAndDate {
+                for (_, entries) in dates {
+                    if entries.count > 1 {
+                        // Sort by timestamp, most recent first
+                        let sortedEntries = entries.sorted { ($0.timestamp ?? Date.distantPast) > ($1.timestamp ?? Date.distantPast) }
+                        // Keep the most recent entry, delete others
+                        for entry in sortedEntries.dropFirst() {
+                            context.delete(entry)
+                            entriesDeleted += 1
+                        }
+                    }
+                }
+            }
+            
+            if entriesDeleted > 0 {
+                try context.save()
+                print("Successfully deleted \(entriesDeleted) duplicate entries.")
+                tableView.reloadData()
+            } else {
+                print("No duplicate entries found to clean up.")
+            }
+            
+        } catch {
+            print("Error cleaning up duplicates: \(error)")
+        }
+    }
+    
+    private func reloadData() {
+        // Reload measurement types
+        let fetchRequest: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+        fetchRequest.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+        
+        do {
+            measurementTypes = try context.fetch(fetchRequest)
+            expandedSections = Set(0..<measurementTypes.count)
+            
+            // Clear existing formula values
+            formulaValuesBySection.removeAll()
+            
+            // Pre-calculate formula values for all formula types
+            for (index, type) in measurementTypes.enumerated() {
+                if type.isFormula {
+                    guard let formula = type.formula,
+                          let dependencies = type.dependencies else { continue }
+                    
+                    // Get all entries for dependencies
+                    var dependencyEntries: [String: [MeasurementEntry]] = [:]
+                    for dependency in dependencies {
+                        if let depType = measurementTypes.first(where: { $0.name == String(dependency) }) {
+                            let entries = depType.entries?.allObjects as? [MeasurementEntry] ?? []
+                            dependencyEntries[String(dependency)] = entries
+                        }
+                    }
+                    
+                    // Group entries by day
+                    var entriesByDay: [Date: [String: Double]] = [:]
+                    for (depName, entries) in dependencyEntries {
+                        for entry in entries {
+                            guard let timestamp = entry.timestamp else { continue }
+                            let day = Calendar.current.startOfDay(for: timestamp)
+                            if entriesByDay[day] == nil {
+                                entriesByDay[day] = [:]
+                            }
+                            entriesByDay[day]?[depName] = entry.value
+                        }
+                    }
+                    
+                    // Calculate formula values for each day
+                    var formulaValues: [Date: Double] = [:]
+                    for (day, values) in entriesByDay {
+                        // Check if we have all dependencies for this day
+                        let hasAllDependencies = dependencies.allSatisfy { values[String($0)] != nil }
+                        if hasAllDependencies {
+                            do {
+                                let result = try evaluateFormula(formula, with: values)
+                                formulaValues[day] = result
+                            } catch {
+                                print("Error evaluating formula for day \(day): \(error)")
+                            }
+                        }
+                    }
+                    
+                    // Store the formula values
+                    formulaValuesBySection[index] = [:]
+                    for (date, value) in formulaValues {
+                        formulaValuesBySection[index]?[date] = ["formula": value]
+                    }
+                }
+            }
+            
+            tableView.reloadData()
+        } catch {
+            print("Error fetching measurement types: \(error)")
+        }
     }
 }
 
@@ -616,9 +1105,8 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
         addButton.translatesAutoresizingMaskIntoConstraints = false
         addButton.isHidden = measurementTypes[section].isFormula // Hide + for formula
         
-        let chevronImage = UIImage(systemName: expandedSections.contains(section) ? "chevron.down" : "chevron.right")
         let chevronButton = UIButton(type: .system)
-        chevronButton.setImage(chevronImage, for: .normal)
+        chevronButton.setImage(UIImage(systemName: expandedSections.contains(section) ? "chevron.down" : "chevron.right"), for: .normal)
         chevronButton.tintColor = .systemGray
         chevronButton.tag = section
         chevronButton.addTarget(self, action: #selector(headerTapped(_:)), for: .touchUpInside)
@@ -643,7 +1131,6 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
             headerView.heightAnchor.constraint(equalToConstant: 44)
         ])
         
-        // Make the entire header tappable
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(headerTapped(_:)))
         headerView.addGestureRecognizer(tapGesture)
         
@@ -674,23 +1161,15 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
             // Count unique days where all dependencies are present
             let dependencyNames = (type.dependencies ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
             guard !dependencyNames.isEmpty, let formula = type.formula else { return 0 }
-            // Gather all entries for dependencies
-            var dayToValues: [String: [String: Double]] = [:] // dateString: [dep: value]
-            for depName in dependencyNames {
-                if let depType = measurementTypes.first(where: { $0.name == depName }), let entries = depType.entries as? Set<MeasurementEntry> {
-                    for entry in entries {
-                        if let date = entry.timestamp {
-                            let day = Calendar.current.startOfDay(for: date)
-                            let dayStr = ISO8601DateFormatter().string(from: day)
-                            dayToValues[dayStr, default: [:]][depName] = entry.value
-                        }
-                    }
-                }
-            }
-            // Only include days where all dependencies are present
-            let validDays = dayToValues.filter { $0.value.keys.count == dependencyNames.count }
+            // Get the valid days from formulaValuesBySection
+            let validDays = formulaValuesBySection[section] ?? [:]
             return expandedSections.contains(section) ? validDays.count : 0
+        } else if let _ = type.healthKitIdentifier {
+            // For HealthKit linked types, only show HealthKit samples
+            let samples = healthKitSamplesBySection[section] ?? []
+            return expandedSections.contains(section) ? samples.count : 0
         } else {
+            // For non-HealthKit types, show Core Data entries
             return expandedSections.contains(section) ? (type.entries?.count ?? 0) : 0
         }
     }
@@ -702,75 +1181,79 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
+        
         if type.isFormula {
-            // Show calculated value for the day
             let dependencyNames = (type.dependencies ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            guard !dependencyNames.isEmpty, let formula = type.formula else { return cell }
-            // Gather all entries for dependencies
-            var dayToValues: [String: [String: Double]] = [:]
-            var dayToDate: [String: Date] = [:]
-            for depName in dependencyNames {
-                if let depType = measurementTypes.first(where: { $0.name == depName }), let entries = depType.entries as? Set<MeasurementEntry> {
-                    for entry in entries {
-                        if let date = entry.timestamp {
-                            let day = Calendar.current.startOfDay(for: date)
-                            let dayStr = ISO8601DateFormatter().string(from: day)
-                            dayToValues[dayStr, default: [:]][depName] = entry.value
-                            dayToDate[dayStr] = day
-                        }
-                    }
-                }
-            }
-            // Only include days where all dependencies are present
+            let dayToValues = formulaValuesBySection[indexPath.section] ?? [:]
             let validDays = dayToValues.filter { $0.value.keys.count == dependencyNames.count }
             let sortedDays = validDays.keys.sorted(by: >)
-            let dayStr = sortedDays[indexPath.row]
-            let values = validDays[dayStr]!
-            let date = dayToDate[dayStr] ?? Date()
-            // Evaluate formula
-            let expr = NSExpression(format: formula)
-            let result = expr.expressionValue(with: values, context: nil) as? Double ?? 0.0
+            
+            // Check if we have enough days
+            guard indexPath.row < sortedDays.count else {
+                return cell
+            }
+            
+            let day = sortedDays[indexPath.row]
+            let values = dayToValues[day] ?? [:]
+            
+            let formula = type.formula ?? ""
+            let result = evaluateFormula(formula, values: values)
             content.text = "\(result.clean) \(type.unit ?? "")"
-            content.secondaryText = formatter.string(from: date)
+            content.secondaryText = formatter.string(from: day)
             if let colorHex = type.color {
                 content.textProperties.color = UIColor(hex: colorHex)
             }
-            cell.contentConfiguration = content
-            cell.selectionStyle = .none
-        } else if let entry = type.entries?.allObjects[indexPath.row] as? MeasurementEntry {
-            if type.unit == "Picture", let imageData = entry.image, let image = UIImage(data: imageData) {
-                // Resize image to thumbnail (fit within 44x44, preserve aspect ratio)
-                let maxThumbnailSize: CGFloat = 44
-                let aspectRatio = image.size.width / image.size.height
-                var targetSize = CGSize(width: maxThumbnailSize, height: maxThumbnailSize)
-                if aspectRatio > 1 {
-                    // Landscape
-                    targetSize.height = maxThumbnailSize / aspectRatio
+        } else if let hkIdStr = type.healthKitIdentifier {
+            // For HealthKit linked types, only show HealthKit samples
+            let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
+            let hkSamples = (healthKitSamplesBySection[indexPath.section] ?? []).sorted { $0.endDate > $1.endDate }
+            let sample = hkSamples[indexPath.row]
+            
+            // Determine the correct HKUnit for the type
+            let unit: HKUnit
+            switch hkId {
+            case .bodyMass: unit = .gramUnit(with: .kilo)
+            case .height: unit = .meter()
+            case .bodyFatPercentage: unit = .percent()
+            case .bodyMassIndex: unit = .count()
+            case .stepCount: unit = .count()
+            case .heartRate: unit = HKUnit(from: "count/min")
+            case .activeEnergyBurned, .basalEnergyBurned: unit = .kilocalorie()
+            default: unit = .count()
+            }
+            
+            let value = sample.quantity.doubleValue(for: unit)
+            content.text = "\(value.clean) \(type.unit ?? "")"
+            content.secondaryText = formatter.string(from: sample.endDate)
+            if let colorHex = type.color {
+                content.textProperties.color = UIColor(hex: colorHex)
+            }
+        } else {
+            // For non-HealthKit types, show Core Data entries
+            if let entries = type.entries?.allObjects as? [MeasurementEntry] {
+                let sortedEntries = entries.sorted { ($0.timestamp ?? Date.distantPast) > ($1.timestamp ?? Date.distantPast) }
+                let entry = sortedEntries[indexPath.row]
+                
+                if type.unit == "Picture" {
+                    if let imageData = entry.image, let image = UIImage(data: imageData) {
+                        content.image = image
+                        content.imageProperties.maximumSize = CGSize(width: 40, height: 40)
+                        content.imageProperties.cornerRadius = 4
+                    }
+                    content.text = formatter.string(from: entry.timestamp ?? Date())
                 } else {
-                    // Portrait or square
-                    targetSize.width = maxThumbnailSize * aspectRatio
+                    content.text = "\(entry.value.clean) \(type.unit ?? "")"
+                    content.secondaryText = formatter.string(from: entry.timestamp ?? Date())
                 }
-                let renderer = UIGraphicsImageRenderer(size: targetSize)
-                let thumbnail = renderer.image { _ in
-                    image.draw(in: CGRect(origin: .zero, size: targetSize))
-                }
-                content.image = thumbnail
-                content.imageProperties.cornerRadius = 8
-                content.imageProperties.maximumSize = CGSize(width: maxThumbnailSize, height: maxThumbnailSize)
-                content.text = nil
-                content.secondaryText = formatter.string(from: entry.timestamp ?? Date())
-                cell.contentConfiguration = content
-                cell.selectionStyle = .default
-            } else {
-                content.text = "\(entry.value) \(type.unit ?? "")"
-                content.secondaryText = formatter.string(from: entry.timestamp ?? Date())
+                
                 if let colorHex = type.color {
                     content.textProperties.color = UIColor(hex: colorHex)
                 }
-                cell.contentConfiguration = content
-                cell.selectionStyle = .none
             }
         }
+        
+        cell.contentConfiguration = content
+        cell.selectionStyle = .none
         return cell
     }
     
@@ -781,7 +1264,22 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
             return
         }
         if editingStyle == .delete {
-            if let entry = type.entries?.allObjects[indexPath.row] as? MeasurementEntry {
+            if let entries = type.entries?.allObjects as? [MeasurementEntry] {
+                let sortedEntries = entries.sorted { ($0.timestamp ?? Date.distantPast) > ($1.timestamp ?? Date.distantPast) }
+                let entry = sortedEntries[indexPath.row]
+                
+                // If the measurement type is linked to HealthKit, delete from HealthKit first
+                if let healthKitIdentifier = type.healthKitIdentifier,
+                   let date = entry.timestamp {
+                    let hkId = HKQuantityTypeIdentifier(rawValue: healthKitIdentifier)
+                    healthKitManager.deleteQuantitySample(identifier: hkId, date: date) { success, error in
+                        if let error = error {
+                            print("Error deleting from HealthKit: \(error)")
+                        }
+                    }
+                }
+                
+                // Delete from Core Data
                 context.delete(entry)
                 do {
                     try context.save()
@@ -805,11 +1303,14 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
             return
         }
         if type.unit == "Picture",
-           let entry = type.entries?.allObjects[indexPath.row] as? MeasurementEntry,
-           let imageData = entry.image,
-           let image = UIImage(data: imageData) {
-            let previewVC = ImagePreviewViewController(image: image)
-            present(previewVC, animated: true)
+           let entries = type.entries?.allObjects as? [MeasurementEntry] {
+            let sortedEntries = entries.sorted { ($0.timestamp ?? Date.distantPast) > ($1.timestamp ?? Date.distantPast) }
+            let entry = sortedEntries[indexPath.row]
+            if let imageData = entry.image,
+               let image = UIImage(data: imageData) {
+                let previewVC = ImagePreviewViewController(image: image)
+                present(previewVC, animated: true)
+            }
         }
         tableView.deselectRow(at: indexPath, animated: true)
     }

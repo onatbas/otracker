@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		681F00DF2DBD8872007838C4 /* DGCharts in Frameworks */ = {isa = PBXBuildFile; productRef = 681F00DE2DBD8872007838C4 /* DGCharts */; };
 		68D3492A2DBD699500AC81FE /* FSCalendar in Frameworks */ = {isa = PBXBuildFile; productRef = 68D349292DBD699500AC81FE /* FSCalendar */; };
 /* End PBXBuildFile section */
 
@@ -69,6 +70,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				681F00DF2DBD8872007838C4 /* DGCharts in Frameworks */,
 				68D3492A2DBD699500AC81FE /* FSCalendar in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -131,6 +133,7 @@
 			name = otracker;
 			packageProductDependencies = (
 				68D349292DBD699500AC81FE /* FSCalendar */,
+				681F00DE2DBD8872007838C4 /* DGCharts */,
 			);
 			productName = otracker;
 			productReference = 6808D4CC2DBD54D40069C150 /* otracker.app */;
@@ -216,6 +219,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				68D349282DBD699500AC81FE /* XCRemoteSwiftPackageReference "FSCalendar" */,
+				681F00DD2DBD8872007838C4 /* XCRemoteSwiftPackageReference "Charts" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6808D4CD2DBD54D40069C150 /* Products */;
@@ -296,6 +300,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = otracker/otracker.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 464MBYJ7TP;
@@ -325,6 +330,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = otracker/otracker.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 464MBYJ7TP;
@@ -578,6 +584,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		681F00DD2DBD8872007838C4 /* XCRemoteSwiftPackageReference "Charts" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ChartsOrg/Charts";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.1.0;
+			};
+		};
 		68D349282DBD699500AC81FE /* XCRemoteSwiftPackageReference "FSCalendar" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/WenchaoD/FSCalendar";
@@ -589,6 +603,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		681F00DE2DBD8872007838C4 /* DGCharts */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 681F00DD2DBD8872007838C4 /* XCRemoteSwiftPackageReference "Charts" */;
+			productName = DGCharts;
+		};
 		68D349292DBD699500AC81FE /* FSCalendar */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 68D349282DBD699500AC81FE /* XCRemoteSwiftPackageReference "FSCalendar" */;

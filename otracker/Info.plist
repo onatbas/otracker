@@ -23,5 +23,9 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>This app needs access to the camera to take pictures for your measurements.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>This app reads your health data to display and sync measurements.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>This app writes your health data when you add new measurements.</string>
 </dict>
 </plist>
