@@ -23,19 +23,49 @@ class MainTabBarController: UITabBarController {
     private func setupViewControllers() {
         let categoriesVC = CategoriesViewController()
         categoriesVC.tabBarItem = UITabBarItem(title: "Categories", image: UIImage(systemName: "list.bullet"), tag: 0)
+        let categoriesNav = UINavigationController(rootViewController: categoriesVC)
         
         let measurementsVC = MeasurementsViewController()
         measurementsVC.tabBarItem = UITabBarItem(title: "Measurements", image: UIImage(systemName: "ruler"), tag: 1)
+        let measurementsNav = UINavigationController(rootViewController: measurementsVC)
         
         let calendarVC = CalendarViewController()
         calendarVC.tabBarItem = UITabBarItem(title: "Calendar", image: UIImage(systemName: "calendar"), tag: 2)
+        let calendarNav = UINavigationController(rootViewController: calendarVC)
         
         // Add SwiftUI GraphTabView as the fourth tab
         let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
         let graphVC = UIHostingController(rootView: GraphTabView().environment(\.managedObjectContext, context))
         graphVC.tabBarItem = UITabBarItem(title: "Graph", image: UIImage(systemName: "chart.xyaxis.line"), tag: 3)
+        let graphNav = UINavigationController(rootViewController: graphVC)
         
-        viewControllers = [categoriesVC, measurementsVC, calendarVC, graphVC]
+        // Configure navigation bar appearance for all navigation controllers
+        let navAppearance = UINavigationBarAppearance()
+        navAppearance.configureWithOpaqueBackground()
+        navAppearance.backgroundColor = .systemBackground
+        navAppearance.titleTextAttributes = [.foregroundColor: UIColor.label]
+        navAppearance.largeTitleTextAttributes = [.foregroundColor: UIColor.label]
+        
+        let navigationControllers = [categoriesNav, measurementsNav, calendarNav, graphNav]
+        for navController in navigationControllers {
+            navController.navigationBar.standardAppearance = navAppearance
+            navController.navigationBar.scrollEdgeAppearance = navAppearance
+            navController.navigationBar.compactAppearance = navAppearance
+            navController.navigationBar.tintColor = .label
+        }
+        
+        // Configure tab bar appearance
+        let tabAppearance = UITabBarAppearance()
+        tabAppearance.configureWithOpaqueBackground()
+        tabAppearance.backgroundColor = .systemBackground
+        tabBar.standardAppearance = tabAppearance
+        if #available(iOS 15.0, *) {
+            tabBar.scrollEdgeAppearance = tabAppearance
+        }
+        tabBar.tintColor = .systemBlue
+        tabBar.unselectedItemTintColor = .secondaryLabel
+        
+        viewControllers = navigationControllers
     }
 }
 
