@@ -8,7 +8,7 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
     private var tableView: UITableView!
     private var measurementsByDate: [Date: [(UIColor, MeasurementEntry)]] = [:]
     private var selectedMeasurements: [Any] = [] // Can be MeasurementEntry or FormulaResult
-    private var allMeasurementTypes: [MeasurementType] = [] // <-- NEW
+    private var allMeasurementTypes: [MeasurementType] = []
     private let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
     private let dateFormatter: DateFormatter = {
         let df = DateFormatter()
@@ -93,21 +93,22 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
     }
     
     private func fetchMeasurements() {
-        // Fetch all types (including formulas)
-        let typeRequest: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+        let request: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+        request.predicate = NSPredicate(format: "isVisible == YES")
         do {
-            allMeasurementTypes = try context.fetch(typeRequest)
+            allMeasurementTypes = try context.fetch(request)
+            tableView.reloadData()
         } catch {
-            allMeasurementTypes = []
+            print("Error fetching measurement types: \(error)")
         }
         
         // Clear existing measurements
         measurementsByDate = [:]
         
         // Fetch Core Data entries for non-HealthKit types
-        let request: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
+        let requestEntries: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
         do {
-            let entries = try context.fetch(request)
+            let entries = try context.fetch(requestEntries)
             for entry in entries {
                 guard let timestamp = entry.timestamp, let type = entry.type, let colorHex = type.color else { continue }
                 // Skip HealthKit-linked types

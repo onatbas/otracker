@@ -12,6 +12,7 @@
         <attribute name="formula" optional="YES" attributeType="String"/>
         <attribute name="healthKitIdentifier" optional="YES" attributeType="String"/>
         <attribute name="isFormula" attributeType="Boolean" defaultValueString="NO"/>
+        <attribute name="isVisible" attributeType="Boolean" defaultValueString="YES"/>
         <attribute name="name" attributeType="String"/>
         <attribute name="unit" attributeType="String"/>
         <relationship name="entries" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="MeasurementEntry" inverseName="type" inverseEntity="MeasurementEntry"/>

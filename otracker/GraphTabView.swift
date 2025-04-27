@@ -6,12 +6,19 @@ import HealthKit
 
 struct GraphTabView: View {
     @Environment(\.managedObjectContext) private var context
-    @FetchRequest(
-        entity: MeasurementType.entity(),
-        sortDescriptors: [NSSortDescriptor(keyPath: \MeasurementType.name, ascending: true)]
-    ) private var measurementTypes: FetchedResults<MeasurementType>
-    
+    @State private var measurementTypes: [MeasurementType] = []
     @State private var selectedType: MeasurementType?
+    
+    private func fetchMeasurementTypes() {
+        let request: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+        request.predicate = NSPredicate(format: "isVisible == YES")
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \MeasurementType.name, ascending: true)]
+        do {
+            measurementTypes = try context.fetch(request)
+        } catch {
+            print("Error fetching measurement types: \(error)")
+        }
+    }
     
     private func latestDisplayValue(for type: MeasurementType) -> String {
         if type.unit == "Picture" {
@@ -68,11 +75,7 @@ struct GraphTabView: View {
         NavigationView {
             VStack(spacing: 0) {
                 // Show all HealthKit-linked categories, even if no entries
-                let allTypes: [MeasurementType] = {
-                    let coreDataTypes = Array(measurementTypes)
-                    // If you want to add more types, do it here (e.g., stub for HealthKit-only)
-                    return coreDataTypes
-                }()
+                let allTypes: [MeasurementType] = measurementTypes
                 if let type = selectedType ?? allTypes.first {
                     if type.unit == "Picture" {
                         PictureGalleryView(type: type)
@@ -87,7 +90,7 @@ struct GraphTabView: View {
                 }
                 Divider()
                 List(selection: $selectedType) {
-                    ForEach(allTypes, id: \..self) { type in
+                    ForEach(allTypes, id: \.self) { type in
                         HStack {
                             if let colorHex = type.color {
                                 Circle()
@@ -110,6 +113,7 @@ struct GraphTabView: View {
                 .listStyle(.plain)
             }
             .navigationTitle("Graph")
+            .onAppear(perform: fetchMeasurementTypes)
         }
     }
 }

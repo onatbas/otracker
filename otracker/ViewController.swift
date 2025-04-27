@@ -455,6 +455,7 @@ class CategoriesViewController: UIViewController {
             measurementType.formula = formula
             measurementType.dependencies = dependencies
             measurementType.healthKitIdentifier = healthKitIdentifier
+            measurementType.isVisible = true  // Set initial visibility to true
             do {
                 try self?.context.save()
                 self?.loadMeasurementTypes()
@@ -492,7 +493,33 @@ extension CategoriesViewController: UITableViewDelegate, UITableViewDataSource {
         }
         cell.contentConfiguration = content
         
+        // Add eye icon toggle button with larger size
+        let eyeButton = UIButton(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
+        let eyeImage = UIImage(systemName: measurementType.isVisible ? "eye.fill" : "eye.slash.fill")?.withConfiguration(UIImage.SymbolConfiguration(pointSize: 20))
+        eyeButton.setImage(eyeImage, for: .normal)
+        eyeButton.tintColor = .systemBlue
+        eyeButton.tag = indexPath.row
+        eyeButton.addTarget(self, action: #selector(eyeButtonTapped(_:)), for: .touchUpInside)
+        cell.accessoryView = eyeButton
+        
         return cell
+    }
+    
+    @objc private func eyeButtonTapped(_ sender: UIButton) {
+        let index = sender.tag
+        let measurementType = measurementTypes[index]
+        measurementType.isVisible = !measurementType.isVisible
+        
+        do {
+            try context.save()
+            // Update the eye icon
+            if let cell = tableView.cellForRow(at: IndexPath(row: index, section: 0)) {
+                let eyeButton = cell.accessoryView as? UIButton
+                eyeButton?.setImage(UIImage(systemName: measurementType.isVisible ? "eye.fill" : "eye.slash.fill"), for: .normal)
+            }
+        } catch {
+            print("Error toggling visibility: \(error)")
+        }
     }
     
     func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
@@ -569,6 +596,7 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
     
     private func loadMeasurementTypes() {
         let request: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
+        request.predicate = NSPredicate(format: "isVisible == YES")
         do {
             measurementTypes = try context.fetch(request)
             tableView.reloadData()
