@@ -163,6 +163,7 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
                         case .stepCount: value = sample.quantity.doubleValue(for: .count())
                         case .heartRate: value = sample.quantity.doubleValue(for: HKUnit(from: "count/min"))
                         case .activeEnergyBurned, .basalEnergyBurned: value = sample.quantity.doubleValue(for: .kilocalorie())
+                        case .waistCircumference: value = sample.quantity.doubleValue(for: .meterUnit(with: .centi))
                         default: value = sample.quantity.doubleValue(for: .count())
                         }
                         return ChartDataEntry(x: Double(idx), y: value)
@@ -297,7 +298,9 @@ struct PictureGalleryView: View {
             .padding(.horizontal, 16)
         }
         .onAppear(perform: fetchEntries)
-        .onChange(of: type) { _ in fetchEntries() }
+        .onChange(of: type) { oldValue, newValue in
+            fetchEntries()
+        }
         .fullScreenCover(isPresented: Binding<Bool>(
             get: { selectedImage != nil },
             set: { if !$0 { selectedImage = nil } }

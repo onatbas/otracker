@@ -10,10 +10,13 @@ import CoreData
 import Charts
 import SwiftUI
 import HealthKit
+import MathParser
+
 
 class MainTabBarController: UITabBarController {
     override func viewDidLoad() {
         super.viewDidLoad()
+
         setupViewControllers()
     }
     
@@ -66,7 +69,8 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate, UIPicker
         ("Steps", "HKQuantityTypeIdentifierStepCount"),
         ("Heart Rate", "HKQuantityTypeIdentifierHeartRate"),
         ("Active Energy (kcal)", "HKQuantityTypeIdentifierActiveEnergyBurned"),
-        ("Resting Energy (kcal)", "HKQuantityTypeIdentifierBasalEnergyBurned")
+        ("Resting Energy (kcal)", "HKQuantityTypeIdentifierBasalEnergyBurned"),
+        ("Waist Circumference (cm)", "HKQuantityTypeIdentifierWaistCircumference")
     ]
     private var selectedHealthKitTypeIndex: Int = 0
     private let healthKitPicker = UIPickerView()
@@ -392,6 +396,395 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate, UIPicker
     }
 }
 
+class EditCategoryViewController: UIViewController, UITextFieldDelegate, UIPickerViewDataSource, UIPickerViewDelegate {
+    private let nameTextField = UITextField()
+    private let unitTextField = UITextField()
+    private let unitOptions = ["cm", "ft", "kg", "lb", "%", "in", "min", "#", "Picture", "Custom"]
+    private var unitButtons: [UIButton] = []
+    private var selectedUnit: String
+    private let saveButton = UIButton(type: .system)
+    private let colorOptions: [UIColor] = [
+        UIColor(red: 0.91, green: 0.30, blue: 0.32, alpha: 1.0), // red
+        UIColor(red: 0.96, green: 0.47, blue: 0.23, alpha: 1.0), // orange
+        UIColor(red: 0.48, green: 0.76, blue: 0.35, alpha: 1.0), // green
+        UIColor(red: 0.27, green: 0.60, blue: 0.78, alpha: 1.0), // blue
+        UIColor(red: 0.41, green: 0.35, blue: 0.80, alpha: 1.0), // purple
+        UIColor(red: 0.99, green: 0.76, blue: 0.18, alpha: 1.0), // yellow
+        UIColor(red: 0.20, green: 0.68, blue: 0.47, alpha: 1.0), // teal
+        UIColor(red: 0.93, green: 0.51, blue: 0.47, alpha: 1.0), // coral
+        UIColor(red: 0.60, green: 0.60, blue: 0.60, alpha: 1.0), // gray
+        UIColor(red: 0.13, green: 0.59, blue: 0.95, alpha: 1.0)  // light blue
+    ]
+    private var colorButtons: [UIButton] = []
+    private var selectedColor: UIColor
+    private let healthKitTypes: [(name: String, identifier: String?)] = [
+        ("None", nil),
+        ("Weight (kg)", "HKQuantityTypeIdentifierBodyMass"),
+        ("Height (m)", "HKQuantityTypeIdentifierHeight"),
+        ("Body Fat %", "HKQuantityTypeIdentifierBodyFatPercentage"),
+        ("BMI", "HKQuantityTypeIdentifierBodyMassIndex"),
+        ("Steps", "HKQuantityTypeIdentifierStepCount"),
+        ("Heart Rate", "HKQuantityTypeIdentifierHeartRate"),
+        ("Active Energy (kcal)", "HKQuantityTypeIdentifierActiveEnergyBurned"),
+        ("Resting Energy (kcal)", "HKQuantityTypeIdentifierBasalEnergyBurned"),
+        ("Waist Circumference (cm)", "HKQuantityTypeIdentifierWaistCircumference")
+    ]
+    private var selectedHealthKitTypeIndex: Int = 0
+    private let healthKitPicker = UIPickerView()
+    private let healthKitLabel = UILabel()
+    private let linkHealthButton = UIButton(type: .system)
+    private var healthKitPickerVisible = false
+    private let completion: (MeasurementType) -> Void
+    private let formulaSwitch = UISwitch()
+    private let formulaLabel = UILabel()
+    private let formulaTextField = UITextField()
+    private let dependenciesTextField = UITextField()
+    private var isFormula: Bool
+    private var formula: String?
+    private var dependencies: String?
+    private let measurementType: MeasurementType
+
+    init(measurementType: MeasurementType, completion: @escaping (MeasurementType) -> Void) {
+        self.measurementType = measurementType
+        self.completion = completion
+        self.selectedUnit = measurementType.unit ?? "cm"
+        self.selectedColor = UIColor(hex: measurementType.color ?? "#E84D52") ?? UIColor(red: 0.91, green: 0.30, blue: 0.32, alpha: 1.0)
+        self.isFormula = measurementType.isFormula
+        self.formula = measurementType.formula
+        self.dependencies = measurementType.dependencies
+        super.init(nibName: nil, bundle: nil)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupUI()
+        nameTextField.delegate = self
+        unitTextField.delegate = self
+        formulaTextField.delegate = self
+        dependenciesTextField.delegate = self
+        healthKitPicker.dataSource = self
+        healthKitPicker.delegate = self
+        
+        // Set initial values
+        nameTextField.text = measurementType.name
+        if measurementType.unit == "Custom" {
+            unitTextField.text = measurementType.unit
+            unitTextField.isHidden = false
+        }
+        formulaSwitch.isOn = measurementType.isFormula
+        formulaTextField.text = measurementType.formula
+        dependenciesTextField.text = measurementType.dependencies
+        formulaTextField.isHidden = !measurementType.isFormula
+        dependenciesTextField.isHidden = !measurementType.isFormula
+        
+        // Set HealthKit picker initial value
+        if let hkId = measurementType.healthKitIdentifier {
+            selectedHealthKitTypeIndex = healthKitTypes.firstIndex { $0.identifier == hkId } ?? 0
+        }
+        healthKitPicker.selectRow(selectedHealthKitTypeIndex, inComponent: 0, animated: false)
+        
+        // Add Done button to navigation bar
+        navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(saveButtonTapped))
+    }
+    
+    private func setupUI() {
+        view.backgroundColor = .systemBackground
+        title = "Edit Category"
+        
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .close,
+            target: self,
+            action: #selector(closeTapped)
+        )
+        
+        nameTextField.placeholder = "Name (e.g., Neck)"
+        nameTextField.borderStyle = .roundedRect
+        nameTextField.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Unit grid
+        let unitGridStack = UIStackView()
+        unitGridStack.axis = .vertical
+        unitGridStack.spacing = 12
+        unitGridStack.translatesAutoresizingMaskIntoConstraints = false
+        let unitsPerRow = 4
+        unitButtons = []
+        for row in 0..<(unitOptions.count / unitsPerRow + (unitOptions.count % unitsPerRow == 0 ? 0 : 1)) {
+            let rowStack = UIStackView()
+            rowStack.axis = .horizontal
+            rowStack.spacing = 12
+            rowStack.distribution = .equalSpacing
+            for col in 0..<unitsPerRow {
+                let idx = row * unitsPerRow + col
+                if idx < unitOptions.count {
+                    let unit = unitOptions[idx]
+                    let button = UIButton(type: .system)
+                    if unit == "Picture" {
+                        let cameraImage = UIImage(systemName: "camera")
+                        button.setImage(cameraImage, for: .normal)
+                        button.tintColor = .label
+                        button.setTitle(nil, for: .normal)
+                    } else {
+                        button.setTitle(unit, for: .normal)
+                        button.setTitleColor(.label, for: .normal)
+                    }
+                    button.backgroundColor = .systemGray6
+                    button.layer.cornerRadius = 8
+                    button.layer.borderWidth = (unit == selectedUnit) ? 2 : 0
+                    button.layer.borderColor = (unit == selectedUnit) ? UIColor.systemBlue.cgColor : UIColor.clear.cgColor
+                    button.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
+                    button.translatesAutoresizingMaskIntoConstraints = false
+                    button.widthAnchor.constraint(equalToConstant: 60).isActive = true
+                    button.heightAnchor.constraint(equalToConstant: 36).isActive = true
+                    button.tag = idx
+                    button.addTarget(self, action: #selector(unitSelected(_:)), for: .touchUpInside)
+                    unitButtons.append(button)
+                    rowStack.addArrangedSubview(button)
+                }
+            }
+            unitGridStack.addArrangedSubview(rowStack)
+        }
+        
+        // Custom unit text field
+        unitTextField.placeholder = "Custom unit"
+        unitTextField.borderStyle = .roundedRect
+        unitTextField.translatesAutoresizingMaskIntoConstraints = false
+        unitTextField.isHidden = selectedUnit != "Custom"
+        
+        // Color grid
+        let colorGridStack = UIStackView()
+        colorGridStack.axis = .vertical
+        colorGridStack.spacing = 16
+        colorGridStack.translatesAutoresizingMaskIntoConstraints = false
+        
+        let colorsPerRow = 5
+        colorButtons = []
+        for row in 0..<(colorOptions.count / colorsPerRow + (colorOptions.count % colorsPerRow == 0 ? 0 : 1)) {
+            let rowStack = UIStackView()
+            rowStack.axis = .horizontal
+            rowStack.spacing = 24
+            rowStack.distribution = .equalSpacing
+            for col in 0..<colorsPerRow {
+                let idx = row * colorsPerRow + col
+                if idx < colorOptions.count {
+                    let color = colorOptions[idx]
+                    let button = UIButton(type: .system)
+                    button.backgroundColor = color
+                    button.layer.cornerRadius = 24
+                    button.layer.masksToBounds = true
+                    button.translatesAutoresizingMaskIntoConstraints = false
+                    button.widthAnchor.constraint(equalToConstant: 48).isActive = true
+                    button.heightAnchor.constraint(equalToConstant: 48).isActive = true
+                    button.tag = idx
+                    button.addTarget(self, action: #selector(colorSelected(_:)), for: .touchUpInside)
+                    if color == selectedColor {
+                        button.layer.borderWidth = 4
+                        button.layer.borderColor = UIColor.systemBlue.cgColor
+                    } else {
+                        button.layer.borderWidth = 0
+                    }
+                    colorButtons.append(button)
+                    rowStack.addArrangedSubview(button)
+                }
+            }
+            colorGridStack.addArrangedSubview(rowStack)
+        }
+        
+        // HealthKit link button
+        linkHealthButton.setTitle("Link with Health Data", for: .normal)
+        linkHealthButton.setTitleColor(.systemBlue, for: .normal)
+        linkHealthButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
+        linkHealthButton.translatesAutoresizingMaskIntoConstraints = false
+        linkHealthButton.addTarget(self, action: #selector(linkHealthTapped), for: .touchUpInside)
+        
+        // HealthKit picker and label (hidden by default)
+        healthKitLabel.text = "Apple Health Data Type (optional)"
+        healthKitLabel.font = .systemFont(ofSize: 16, weight: .medium)
+        healthKitLabel.translatesAutoresizingMaskIntoConstraints = false
+        healthKitLabel.isHidden = true
+        healthKitPicker.translatesAutoresizingMaskIntoConstraints = false
+        healthKitPicker.isHidden = true
+        
+        formulaLabel.text = "Formula"
+        formulaLabel.font = .systemFont(ofSize: 18, weight: .medium)
+        formulaLabel.translatesAutoresizingMaskIntoConstraints = false
+        formulaSwitch.translatesAutoresizingMaskIntoConstraints = false
+        formulaSwitch.addTarget(self, action: #selector(formulaSwitchChanged), for: .valueChanged)
+        formulaTextField.placeholder = "Formula (e.g. DIAMETER*3.14*2)"
+        formulaTextField.borderStyle = .roundedRect
+        formulaTextField.translatesAutoresizingMaskIntoConstraints = false
+        formulaTextField.isHidden = !isFormula
+        dependenciesTextField.placeholder = "Dependencies (comma-separated, e.g. DIAMETER)"
+        dependenciesTextField.borderStyle = .roundedRect
+        dependenciesTextField.translatesAutoresizingMaskIntoConstraints = false
+        dependenciesTextField.isHidden = !isFormula
+        
+        saveButton.setTitle("Save", for: .normal)
+        saveButton.backgroundColor = .systemBlue
+        saveButton.setTitleColor(.white, for: .normal)
+        saveButton.layer.cornerRadius = 8
+        saveButton.addTarget(self, action: #selector(saveButtonTapped), for: .touchUpInside)
+        saveButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        view.addSubview(nameTextField)
+        view.addSubview(unitGridStack)
+        view.addSubview(unitTextField)
+        view.addSubview(colorGridStack)
+        view.addSubview(linkHealthButton)
+        view.addSubview(healthKitLabel)
+        view.addSubview(healthKitPicker)
+        view.addSubview(formulaLabel)
+        view.addSubview(formulaSwitch)
+        view.addSubview(formulaTextField)
+        view.addSubview(dependenciesTextField)
+        view.addSubview(saveButton)
+        
+        NSLayoutConstraint.activate([
+            nameTextField.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+            nameTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            nameTextField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            nameTextField.heightAnchor.constraint(equalToConstant: 44),
+            
+            unitGridStack.topAnchor.constraint(equalTo: nameTextField.bottomAnchor, constant: 20),
+            unitGridStack.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            unitGridStack.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
+            unitTextField.topAnchor.constraint(equalTo: unitGridStack.bottomAnchor, constant: 8),
+            unitTextField.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            unitTextField.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
+            unitTextField.heightAnchor.constraint(equalToConstant: 44),
+            
+            colorGridStack.topAnchor.constraint(equalTo: unitTextField.bottomAnchor, constant: 24),
+            colorGridStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            
+            linkHealthButton.topAnchor.constraint(equalTo: colorGridStack.bottomAnchor, constant: 24),
+            linkHealthButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            
+            healthKitLabel.topAnchor.constraint(equalTo: linkHealthButton.bottomAnchor, constant: 12),
+            healthKitLabel.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            healthKitPicker.topAnchor.constraint(equalTo: healthKitLabel.bottomAnchor, constant: 8),
+            healthKitPicker.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            healthKitPicker.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
+            healthKitPicker.heightAnchor.constraint(equalToConstant: 100),
+            
+            formulaLabel.topAnchor.constraint(equalTo: healthKitPicker.bottomAnchor, constant: 24),
+            formulaLabel.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            formulaSwitch.centerYAnchor.constraint(equalTo: formulaLabel.centerYAnchor),
+            formulaSwitch.leadingAnchor.constraint(equalTo: formulaLabel.trailingAnchor, constant: 12),
+            formulaTextField.topAnchor.constraint(equalTo: formulaLabel.bottomAnchor, constant: 12),
+            formulaTextField.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            formulaTextField.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
+            formulaTextField.heightAnchor.constraint(equalToConstant: 44),
+            dependenciesTextField.topAnchor.constraint(equalTo: formulaTextField.bottomAnchor, constant: 8),
+            dependenciesTextField.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            dependenciesTextField.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
+            dependenciesTextField.heightAnchor.constraint(equalToConstant: 44),
+            
+            saveButton.topAnchor.constraint(equalTo: dependenciesTextField.bottomAnchor, constant: 32),
+            saveButton.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
+            saveButton.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
+            saveButton.heightAnchor.constraint(equalToConstant: 44)
+        ])
+    }
+    
+    @objc private func linkHealthTapped() {
+        healthKitPickerVisible.toggle()
+        healthKitLabel.isHidden = !healthKitPickerVisible
+        healthKitPicker.isHidden = !healthKitPickerVisible
+    }
+    
+    @objc private func unitSelected(_ sender: UIButton) {
+        let idx = sender.tag
+        selectedUnit = unitOptions[idx]
+        for (i, button) in unitButtons.enumerated() {
+            if i == idx {
+                button.layer.borderWidth = 2
+                button.layer.borderColor = UIColor.systemBlue.cgColor
+            } else {
+                button.layer.borderWidth = 0
+            }
+        }
+        if selectedUnit == "Custom" {
+            unitTextField.isHidden = false
+        } else {
+            unitTextField.isHidden = true
+        }
+    }
+    
+    @objc private func colorSelected(_ sender: UIButton) {
+        let idx = sender.tag
+        selectedColor = colorOptions[idx]
+        for (i, button) in colorButtons.enumerated() {
+            if i == idx {
+                button.layer.borderWidth = 4
+                button.layer.borderColor = UIColor.systemBlue.cgColor
+            } else {
+                button.layer.borderWidth = 0
+            }
+        }
+    }
+    
+    @objc private func formulaSwitchChanged() {
+        isFormula = formulaSwitch.isOn
+        formulaTextField.isHidden = !isFormula
+        dependenciesTextField.isHidden = !isFormula
+    }
+    
+    @objc private func saveButtonTapped() {
+        guard let name = nameTextField.text, !name.isEmpty else {
+            return
+        }
+        let unit: String
+        if selectedUnit == "Custom" {
+            guard let customUnit = unitTextField.text, !customUnit.isEmpty else { return }
+            unit = customUnit
+        } else {
+            unit = selectedUnit
+        }
+        
+        // Update the measurement type
+        measurementType.name = name
+        measurementType.unit = unit
+        measurementType.color = selectedColor.toHex()
+        measurementType.isFormula = isFormula
+        measurementType.formula = isFormula ? formulaTextField.text : nil
+        measurementType.dependencies = isFormula ? dependenciesTextField.text : nil
+        measurementType.healthKitIdentifier = healthKitPickerVisible ? healthKitTypes[selectedHealthKitTypeIndex].identifier : nil
+        
+        completion(measurementType)
+        dismiss(animated: true)
+    }
+    
+    @objc private func closeTapped() {
+        dismiss(animated: true)
+    }
+    
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        return false;
+    }
+    
+    // MARK: - UIPickerViewDataSource
+    func numberOfComponents(in pickerView: UIPickerView) -> Int {
+        return 1
+    }
+    
+    func pickerView(_ pickerView: UIPickerView, numberOfRowsInComponent component: Int) -> Int {
+        return healthKitTypes.count
+    }
+    
+    // MARK: - UIPickerViewDelegate
+    func pickerView(_ pickerView: UIPickerView, titleForRow row: Int, forComponent component: Int) -> String? {
+        return healthKitTypes[row].name
+    }
+    
+    func pickerView(_ pickerView: UIPickerView, didSelectRow row: Int, inComponent component: Int) {
+        selectedHealthKitTypeIndex = row
+    }
+}
+
 class CategoriesViewController: UIViewController {
     private let tableView = UITableView()
     private let addButton = UIButton(type: .system)
@@ -493,61 +886,72 @@ extension CategoriesViewController: UITableViewDelegate, UITableViewDataSource {
         }
         cell.contentConfiguration = content
         
-        // Add eye icon toggle button with larger size
-        let eyeButton = UIButton(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
-        let eyeImage = UIImage(systemName: measurementType.isVisible ? "eye.fill" : "eye.slash.fill")?.withConfiguration(UIImage.SymbolConfiguration(pointSize: 20))
-        eyeButton.setImage(eyeImage, for: .normal)
-        eyeButton.tintColor = .systemBlue
-        eyeButton.tag = indexPath.row
-        eyeButton.addTarget(self, action: #selector(eyeButtonTapped(_:)), for: .touchUpInside)
-        cell.accessoryView = eyeButton
-        
         return cell
     }
     
-    @objc private func eyeButtonTapped(_ sender: UIButton) {
-        let index = sender.tag
-        let measurementType = measurementTypes[index]
-        measurementType.isVisible = !measurementType.isVisible
+    func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        let measurementType = measurementTypes[indexPath.row]
         
-        do {
-            try context.save()
-            // Update the eye icon
-            if let cell = tableView.cellForRow(at: IndexPath(row: index, section: 0)) {
-                let eyeButton = cell.accessoryView as? UIButton
-                eyeButton?.setImage(UIImage(systemName: measurementType.isVisible ? "eye.fill" : "eye.slash.fill"), for: .normal)
+        // Edit action
+        let editAction = UIContextualAction(style: .normal, title: nil) { [weak self] (_, _, completion) in
+            guard let self = self else { return }
+            let editVC = EditCategoryViewController(measurementType: measurementType) { [weak self] updatedType in
+                guard let self = self else { return }
+                try? self.context.save()
+                self.tableView.reloadData()
             }
-        } catch {
-            print("Error toggling visibility: \(error)")
+            let navController = UINavigationController(rootViewController: editVC)
+            self.present(navController, animated: true)
+            completion(true)
         }
+        editAction.image = UIImage(systemName: "pencil")
+        editAction.backgroundColor = .systemBlue
+        
+        // Visibility toggle action
+        let visibilityAction = UIContextualAction(style: .normal, title: nil) { [weak self] (_, _, completion) in
+            guard let self = self else { return }
+            measurementType.isVisible = !measurementType.isVisible
+            do {
+                try self.context.save()
+                self.tableView.reloadData()
+            } catch {
+                print("Error toggling visibility: \(error)")
+            }
+            completion(true)
+        }
+        visibilityAction.image = UIImage(systemName: measurementType.isVisible ? "eye.slash" : "eye")
+        visibilityAction.backgroundColor = .systemGray
+        
+        return UISwipeActionsConfiguration(actions: [editAction, visibilityAction])
     }
     
-    func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
-        if editingStyle == .delete {
-            let measurementType = measurementTypes[indexPath.row]
+    func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        let deleteAction = UIContextualAction(style: .destructive, title: nil) { [weak self] (_, _, completion) in
+            guard let self = self else { return }
+            let measurementType = self.measurementTypes[indexPath.row]
             
             // Delete all associated measurements first
             if let entries = measurementType.entries?.allObjects as? [MeasurementEntry] {
                 for entry in entries {
-                    context.delete(entry)
+                    self.context.delete(entry)
                 }
             }
             
             // Then delete the measurement type
-            context.delete(measurementType)
+            self.context.delete(measurementType)
             
             do {
-                try context.save()
-                measurementTypes.remove(at: indexPath.row)
+                try self.context.save()
+                self.measurementTypes.remove(at: indexPath.row)
                 tableView.deleteRows(at: [indexPath], with: .automatic)
             } catch {
                 print("Error deleting measurement type: \(error)")
             }
+            completion(true)
         }
-    }
-    
-    func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
-        return true
+        deleteAction.image = UIImage(systemName: "trash")
+        
+        return UISwipeActionsConfiguration(actions: [deleteAction])
     }
 }
 
@@ -642,6 +1046,7 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
                     case .stepCount: unit = .count()
                     case .heartRate: unit = HKUnit(from: "count/min")
                     case .activeEnergyBurned, .basalEnergyBurned: unit = .kilocalorie()
+                    case .waistCircumference: unit = .meterUnit(with: .centi)
                     default: unit = .count()
                     }
                     HealthKitManager.shared.saveQuantitySample(identifier: hkId, value: value, unit: unit, date: date)
@@ -710,7 +1115,6 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
             tableView.reloadSections(IndexSet(integer: section), with: .automatic)
         } else {
             expandedSections.insert(section)
-            // If this section is linked to HealthKit, fetch samples
             let type = measurementTypes[section]
             print("\n=== Expanding Section: \(type.name ?? "Unknown") ===")
             print("Type Details:")
@@ -738,80 +1142,212 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
                 print("\nNo Core Data entries found")
             }
             
-            // Log HealthKit data if applicable
-            if let hkIdStr = type.healthKitIdentifier {
-                let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
-                print("\nFetching HealthKit data for: \(hkIdStr)")
-                requestHealthKitAndFetch(for: hkId, section: section)
-            }
-            
-            // Calculate formula values if applicable
-            if type.isFormula {
-                print("\nFormula Values:")
-                if let dependencies = type.dependencies?.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }),
-                   let formula = type.formula {
-                    print("- Dependencies: \(dependencies)")
-                    print("- Formula: \(formula)")
-                    
-                    // Gather all entries for dependencies
-                    var depEntries: [String: [MeasurementEntry]] = [:]
-                    for depName in dependencies {
-                        if let depType = measurementTypes.first(where: { $0.name == depName }),
-                           let entries = depType.entries?.allObjects as? [MeasurementEntry] {
-                            depEntries[depName] = entries.sorted { ($0.timestamp ?? Date.distantPast) < ($1.timestamp ?? Date.distantPast) }
-                            print("\nFound \(entries.count) entries for \(depName):")
-                            for entry in entries {
-                                if let date = entry.timestamp {
-                                    print("- \(date): \(entry.value)")
-                                }
+            // If this is a formula type, fetch HealthKit data for all dependencies first
+            if type.isFormula, let dependencies = type.dependencies?.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) {
+                var remainingDependencies = dependencies.count
+                let group = DispatchGroup()
+                
+                for depName in dependencies {
+                    if let depType = measurementTypes.first(where: { $0.name == depName }),
+                       let hkIdStr = depType.healthKitIdentifier,
+                       let depSection = measurementTypes.firstIndex(where: { $0.name == depName }) {
+                        let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
+                        group.enter()
+                        requestHealthKitAndFetch(for: hkId, section: depSection) { [weak self] in
+                            remainingDependencies -= 1
+                            if remainingDependencies == 0 {
+                                self?.calculateFormulaValues(for: type, section: section, dependencies: dependencies)
                             }
-                        } else {
-                            print("No entries found for dependency: \(depName)")
+                            group.leave()
                         }
-                    }
-                    
-                    // For each day where we have a measurement, find the most recent values for each dependency
-                    var dayToValues: [Date: [String: Double]] = [:]
-                    for (depName, entries) in depEntries {
-                        for entry in entries {
-                            if let date = entry.timestamp {
-                                let day = Calendar.current.startOfDay(for: date)
-                                // For each dependency, find the most recent value up to this day
-                                for (otherDepName, otherEntries) in depEntries {
-                                    if otherDepName != depName {
-                                        if let mostRecentEntry = otherEntries.last(where: { 
-                                            if let otherDate = $0.timestamp {
-                                                return Calendar.current.startOfDay(for: otherDate) <= day
-                                            }
-                                            return false
-                                        }) {
-                                            dayToValues[day, default: [:]][otherDepName] = mostRecentEntry.value
-                                        }
-                                    }
-                                }
-                                // Add the current entry's value
-                                dayToValues[day, default: [:]][depName] = entry.value
-                            }
+                    } else {
+                        remainingDependencies -= 1
+                        if remainingDependencies == 0 {
+                            calculateFormulaValues(for: type, section: section, dependencies: dependencies)
                         }
-                    }
-                    
-                    // Only include days where we have all dependencies
-                    let validDays = dayToValues.filter { $0.value.keys.count == dependencies.count }
-                    formulaValuesBySection[section] = validDays
-                    
-                    print("\nValid days with all dependencies: \(validDays.count)")
-                    for (day, values) in validDays {
-                        let result = evaluateFormula(formula, values: values)
-                        print("- \(day): \(result) (values: \(values))")
                     }
                 }
+            } else if let hkIdStr = type.healthKitIdentifier {
+                let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
+                requestHealthKitAndFetch(for: hkId, section: section)
             }
             
             tableView.reloadSections(IndexSet(integer: section), with: .automatic)
         }
     }
     
-    private func requestHealthKitAndFetch(for identifier: HKQuantityTypeIdentifier, section: Int) {
+    private func calculateFormulaValues(for type: MeasurementType, section: Int, dependencies: [String]) {
+        guard let formula = type.formula else { return }
+        
+        print("\nFormula Values:")
+        print("- Dependencies: \(dependencies)")
+        print("- Formula: \(formula)")
+        
+        // Gather all entries for dependencies
+        var depEntries: [String: [MeasurementEntry]] = [:]
+        var depHealthKitSamples: [String: [HKQuantitySample]] = [:]
+        
+        for depName in dependencies {
+            if let depType = measurementTypes.first(where: { $0.name == depName }) {
+                // Get Core Data entries
+                if let entries = depType.entries?.allObjects as? [MeasurementEntry] {
+                    depEntries[depName] = entries.sorted { ($0.timestamp ?? Date.distantPast) < ($1.timestamp ?? Date.distantPast) }
+                    print("\nFound \(entries.count) Core Data entries for \(depName):")
+                    for entry in entries {
+                        if let date = entry.timestamp {
+                            print("- \(date): \(entry.value)")
+                        }
+                    }
+                }
+                
+                // Get HealthKit samples if applicable
+                if let hkIdStr = depType.healthKitIdentifier,
+                   let depSection = measurementTypes.firstIndex(where: { $0.name == depName }) {
+                    let samples = healthKitSamplesBySection[depSection] ?? []
+                    depHealthKitSamples[depName] = samples
+                    print("\nFound \(samples.count) HealthKit samples for \(depName):")
+                    for sample in samples {
+                        // Determine the correct HKUnit for the type
+                        let unit: HKUnit
+                        let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
+                        switch hkId {
+                        case .bodyMass: unit = .gramUnit(with: .kilo)
+                        case .height: unit = .meter()
+                        case .bodyFatPercentage: unit = .percent()
+                        case .bodyMassIndex: unit = .count()
+                        case .stepCount: unit = .count()
+                        case .heartRate: unit = HKUnit(from: "count/min")
+                        case .activeEnergyBurned, .basalEnergyBurned: unit = .kilocalorie()
+                        case .waistCircumference: unit = .meterUnit(with: .centi)
+                        default: unit = .count()
+                        }
+                        let value = sample.quantity.doubleValue(for: unit)
+                        print("- \(sample.endDate): \(value)")
+                    }
+                }
+            }
+        }
+        
+        // For each day where we have a measurement, find the most recent values for each dependency
+        var dayToValues: [Date: [String: Double]] = [:]
+        
+        // Process Core Data entries
+        for (depName, entries) in depEntries {
+            for entry in entries {
+                if let date = entry.timestamp {
+                    let day = Calendar.current.startOfDay(for: date)
+                    dayToValues[day, default: [:]][depName] = entry.value
+                }
+            }
+        }
+        
+        // Process HealthKit samples
+        for (depName, samples) in depHealthKitSamples {
+            for sample in samples {
+                let day = Calendar.current.startOfDay(for: sample.endDate)
+                // Determine the correct HKUnit for the type
+                let unit: HKUnit
+                if let depType = measurementTypes.first(where: { $0.name == depName }),
+                   let hkIdStr = depType.healthKitIdentifier {
+                    let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
+                    switch hkId {
+                    case .bodyMass: unit = .gramUnit(with: .kilo)
+                    case .height: unit = .meter()
+                    case .bodyFatPercentage: unit = .percent()
+                    case .bodyMassIndex: unit = .count()
+                    case .stepCount: unit = .count()
+                    case .heartRate: unit = HKUnit(from: "count/min")
+                    case .activeEnergyBurned, .basalEnergyBurned: unit = .kilocalorie()
+                    case .waistCircumference: unit = .meterUnit(with: .centi)
+                    default: unit = .count()
+                    }
+                    let value = sample.quantity.doubleValue(for: unit)
+                    dayToValues[day, default: [:]][depName] = value
+                }
+            }
+        }
+        
+        // For each day, find the most recent value for each missing dependency
+        let sortedDays = dayToValues.keys.sorted(by: >)
+        var validDays: [Date: [String: Double]] = [:]
+        
+        for day in sortedDays {
+            var values = dayToValues[day] ?? [:]
+            var hasAllValues = true
+            
+            // For each missing dependency, find the most recent value
+            for depName in dependencies {
+                if values[depName] == nil {
+                    // Find the most recent value for this dependency
+                    var foundValue: Double?
+                    var foundDate: Date?
+                    
+                    // Check Core Data entries
+                    if let entries = depEntries[depName] {
+                        for entry in entries {
+                            if let date = entry.timestamp, date <= day {
+                                foundValue = entry.value
+                                foundDate = date
+                                break
+                            }
+                        }
+                    }
+                    
+                    // Check HealthKit samples
+                    if foundValue == nil, let samples = depHealthKitSamples[depName] {
+                        for sample in samples {
+                            if sample.endDate <= day {
+                                if let depType = measurementTypes.first(where: { $0.name == depName }),
+                                   let hkIdStr = depType.healthKitIdentifier {
+                                    let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
+                                    let unit: HKUnit
+                                    switch hkId {
+                                    case .bodyMass: unit = .gramUnit(with: .kilo)
+                                    case .height: unit = .meter()
+                                    case .bodyFatPercentage: unit = .percent()
+                                    case .bodyMassIndex: unit = .count()
+                                    case .stepCount: unit = .count()
+                                    case .heartRate: unit = HKUnit(from: "count/min")
+                                    case .activeEnergyBurned, .basalEnergyBurned: unit = .kilocalorie()
+                                    case .waistCircumference: unit = .meterUnit(with: .centi)
+                                    default: unit = .count()
+                                    }
+                                    foundValue = sample.quantity.doubleValue(for: unit)
+                                    foundDate = sample.endDate
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    
+                    if let value = foundValue {
+                        values[depName] = value
+                    } else {
+                        hasAllValues = false
+                        break
+                    }
+                }
+            }
+            
+            if hasAllValues {
+                validDays[day] = values
+            }
+        }
+        
+        formulaValuesBySection[section] = validDays
+        
+        print("\nValid days with all dependencies: \(validDays.count)")
+        for (day, values) in validDays {
+            let result = evaluateFormula(formula, values: values)
+            print("- \(day): \(result) (values: \(values))")
+        }
+        
+        DispatchQueue.main.async { [weak self] in
+            self?.tableView.reloadSections(IndexSet(integer: section), with: .automatic)
+        }
+    }
+    
+    private func requestHealthKitAndFetch(for identifier: HKQuantityTypeIdentifier, section: Int, completion: (() -> Void)? = nil) {
         let typesToRead: Set<HKObjectType> = [HKObjectType.quantityType(forIdentifier: identifier)!]
         if !healthKitAuthRequested {
             let typesToShare: Set<HKSampleType> = [HKObjectType.quantityType(forIdentifier: identifier)!]
@@ -819,16 +1355,18 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
                 DispatchQueue.main.async {
                     self?.healthKitAuthRequested = true
                     if success {
-                        self?.fetchHealthKitSamples(for: identifier, section: section)
+                        self?.fetchHealthKitSamples(for: identifier, section: section, completion: completion)
+                    } else {
+                        completion?()
                     }
                 }
             }
         } else {
-            fetchHealthKitSamples(for: identifier, section: section)
+            fetchHealthKitSamples(for: identifier, section: section, completion: completion)
         }
     }
     
-    private func fetchHealthKitSamples(for identifier: HKQuantityTypeIdentifier, section: Int) {
+    private func fetchHealthKitSamples(for identifier: HKQuantityTypeIdentifier, section: Int, completion: (() -> Void)? = nil) {
         print("\n=== Fetching HealthKit Samples ===")
         print("Type: \(identifier.rawValue)")
         print("Section: \(section)")
@@ -841,88 +1379,32 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
                 // Log sample details
                 for (index, sample) in samples.enumerated() {
                     print("Sample \(index + 1):")
-                    print("- Value: \(sample.quantity.doubleValue)")
+                    print("- Value: \(String(describing: sample.quantity.doubleValue))")
                     print("- Date: \(sample.endDate)")
                 }
                 
                 self?.healthKitSamplesBySection[section] = samples
-                
-                // Check if we need to import to Core Data
-                let type = self?.measurementTypes[section]
-                if let type = type {
-                    print("\n=== Core Data Analysis ===")
-                    print("Measurement Type: \(type.name ?? "Unknown")")
-                    
-                    // First, let's see what's in Core Data
-                    let request: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
-                    request.predicate = NSPredicate(format: "type == %@", type)
-                    do {
-                        let entries = try self?.context.fetch(request) ?? []
-                        print("\nCore Data Entries:")
-                        print("Total entries: \(entries.count)")
-                        
-                        // Group entries by day to see duplicates
-                        var entriesByDay: [String: [MeasurementEntry]] = [:]
-                        let dateFormatter = DateFormatter()
-                        dateFormatter.dateFormat = "yyyy-MM-dd"
-                        
-                        for entry in entries {
-                            if let date = entry.timestamp {
-                                let dayString = dateFormatter.string(from: date)
-                                entriesByDay[dayString, default: []].append(entry)
-                            }
-                        }
-                        
-                        // Log entries with duplicates
-                        print("\nEntries by day:")
-                        for (day, dayEntries) in entriesByDay {
-                            if dayEntries.count > 1 {
-                                print("Day \(day) has \(dayEntries.count) entries:")
-                                for entry in dayEntries {
-                                    print("- Value: \(entry.value), Timestamp: \(entry.timestamp?.description ?? "nil")")
-                                }
-                            }
-                        }
-                        
-                        // Now check HealthKit samples
-                        print("\nHealthKit Samples Analysis:")
-                        var samplesByDay: [String: [HKQuantitySample]] = [:]
-                        for sample in samples {
-                            let dayString = dateFormatter.string(from: sample.endDate)
-                            samplesByDay[dayString, default: []].append(sample)
-                        }
-                        
-                        print("\nSamples by day:")
-                        for (day, daySamples) in samplesByDay {
-                            if daySamples.count > 1 {
-                                print("Day \(day) has \(daySamples.count) samples:")
-                                for sample in daySamples {
-                                    print("- Value: \(sample.quantity.doubleValue), Date: \(sample.endDate)")
-                                }
-                            }
-                        }
-                        
-                    } catch {
-                        print("Error fetching Core Data entries: \(error)")
-                    }
-                }
-                
-                self?.tableView.reloadSections(IndexSet(integer: section), with: .automatic)
+                completion?()
             }
         }
     }
     
     private func evaluateFormula(_ formula: String, values: [String: Double]) -> Double {
-        // Simple formula evaluation - supports basic arithmetic
         // Replace variable names with their values
         var evaluatedFormula = formula
         for (name, value) in values {
             evaluatedFormula = evaluatedFormula.replacingOccurrences(of: name, with: "\(value)")
         }
         
-        // Use NSExpression for safe evaluation
-        let expression = NSExpression(format: evaluatedFormula)
-        return (expression.expressionValue(with: nil, context: nil) as? Double) ?? 0.0
+        do {
+            let expression = try MathParser.Expression(string: evaluatedFormula)
+            let evaluator = MathParser.Evaluator()
+            let result = try evaluator.evaluate(expression)
+            return result
+        } catch {
+            print("Error evaluating formula: \(error)")
+            return 0.0
+        }
     }
     
     private func evaluateFormula(_ formula: String, with values: [String: Double]) throws -> Double {
@@ -1188,7 +1670,7 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
         if type.isFormula {
             // Count unique days where all dependencies are present
             let dependencyNames = (type.dependencies ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            guard !dependencyNames.isEmpty, let formula = type.formula else { return 0 }
+            guard !dependencyNames.isEmpty, let _ = type.formula else { return 0 }
             // Get the valid days from formulaValuesBySection
             let validDays = formulaValuesBySection[section] ?? [:]
             return expandedSections.contains(section) ? validDays.count : 0
@@ -1216,8 +1698,10 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
             let validDays = dayToValues.filter { $0.value.keys.count == dependencyNames.count }
             let sortedDays = validDays.keys.sorted(by: >)
             
-            // Check if we have enough days
+            // Check if we have enough days and the index is valid
             guard indexPath.row < sortedDays.count else {
+                content.text = "No data available"
+                cell.contentConfiguration = content
                 return cell
             }
             
@@ -1235,6 +1719,14 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
             // For HealthKit linked types, only show HealthKit samples
             let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
             let hkSamples = (healthKitSamplesBySection[indexPath.section] ?? []).sorted { $0.endDate > $1.endDate }
+            
+            // Check if we have enough samples and the index is valid
+            guard indexPath.row < hkSamples.count else {
+                content.text = "No data available"
+                cell.contentConfiguration = content
+                return cell
+            }
+            
             let sample = hkSamples[indexPath.row]
             
             // Determine the correct HKUnit for the type
@@ -1247,6 +1739,7 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
             case .stepCount: unit = .count()
             case .heartRate: unit = HKUnit(from: "count/min")
             case .activeEnergyBurned, .basalEnergyBurned: unit = .kilocalorie()
+            case .waistCircumference: unit = .meterUnit(with: .centi)
             default: unit = .count()
             }
             
@@ -1260,6 +1753,14 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
             // For non-HealthKit types, show Core Data entries
             if let entries = type.entries?.allObjects as? [MeasurementEntry] {
                 let sortedEntries = entries.sorted { ($0.timestamp ?? Date.distantPast) > ($1.timestamp ?? Date.distantPast) }
+                
+                // Check if we have enough entries and the index is valid
+                guard indexPath.row < sortedEntries.count else {
+                    content.text = "No data available"
+                    cell.contentConfiguration = content
+                    return cell
+                }
+                
                 let entry = sortedEntries[indexPath.row]
                 
                 if type.unit == "Picture" {
@@ -1296,24 +1797,40 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
                 let sortedEntries = entries.sorted { ($0.timestamp ?? Date.distantPast) > ($1.timestamp ?? Date.distantPast) }
                 let entry = sortedEntries[indexPath.row]
                 
-                // If the measurement type is linked to HealthKit, delete from HealthKit first
+                // If the measurement type is linked to HealthKit, delete from HealthKit only
                 if let healthKitIdentifier = type.healthKitIdentifier,
                    let date = entry.timestamp {
                     let hkId = HKQuantityTypeIdentifier(rawValue: healthKitIdentifier)
-                    healthKitManager.deleteQuantitySample(identifier: hkId, date: date) { success, error in
-                        if let error = error {
-                            print("Error deleting from HealthKit: \(error)")
+                    
+                    // Get the corresponding HealthKit sample
+                    let samples = healthKitSamplesBySection[indexPath.section] ?? []
+                    if let matchingSample = samples.first(where: { 
+                        Calendar.current.isDate($0.endDate, inSameDayAs: date) &&
+                        abs($0.endDate.timeIntervalSince(date)) < 60 // Within 1 minute
+                    }) {
+                        healthKitManager.deleteQuantitySample(identifier: hkId, date: matchingSample.endDate) { [weak self] (success: Bool, error: Error?) in
+                            DispatchQueue.main.async {
+                                guard let self = self else { return }
+                                
+                                if let error = error {
+                                    print("Error deleting from HealthKit: \(error)")
+                                }
+                                
+                                // Reload the table view to ensure consistency
+                                self.tableView.reloadData()
+                            }
                         }
                     }
-                }
-                
-                // Delete from Core Data
-                context.delete(entry)
-                do {
-                    try context.save()
-                    tableView.deleteRows(at: [indexPath], with: .automatic)
-                } catch {
-                    print("Error deleting measurement entry: \(error)")
+                } else {
+                    // For non-HealthKit entries, delete from Core Data
+                    context.delete(entry)
+                    do {
+                        try context.save()
+                        loadMeasurementTypes()
+                        tableView.reloadData()
+                    } catch {
+                        print("Error deleting measurement entry: \(error)")
+                    }
                 }
             }
         }
@@ -1542,4 +2059,5 @@ class AddMeasurementViewController: UIViewController, UITextFieldDelegate {
 extension Notification.Name {
     static let measurementAdded = Notification.Name("MeasurementAdded")
 }
+
 

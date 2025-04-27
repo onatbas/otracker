@@ -89,7 +89,9 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
     
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
-        updateCalendarAppearance()
+        if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
+            updateCalendarAppearance()
+        }
     }
     
     private func fetchMeasurements() {
@@ -146,15 +148,17 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
                                 
                                 // Convert the sample value to the appropriate unit
                                 let value: Double
+                                let unit: HKUnit
                                 switch hkId {
-                                case .bodyMass: value = sample.quantity.doubleValue(for: .gramUnit(with: .kilo))
-                                case .height: value = sample.quantity.doubleValue(for: .meter())
-                                case .bodyFatPercentage: value = sample.quantity.doubleValue(for: .percent())
-                                case .bodyMassIndex: value = sample.quantity.doubleValue(for: .count())
-                                case .stepCount: value = sample.quantity.doubleValue(for: .count())
-                                case .heartRate: value = sample.quantity.doubleValue(for: HKUnit(from: "count/min"))
-                                case .activeEnergyBurned, .basalEnergyBurned: value = sample.quantity.doubleValue(for: .kilocalorie())
-                                default: value = sample.quantity.doubleValue(for: .count())
+                                case .bodyMass: unit = .gramUnit(with: .kilo); value = sample.quantity.doubleValue(for: unit)
+                                case .height: unit = .meter(); value = sample.quantity.doubleValue(for: unit)
+                                case .bodyFatPercentage: unit = .percent(); value = sample.quantity.doubleValue(for: unit)
+                                case .bodyMassIndex: unit = .count(); value = sample.quantity.doubleValue(for: unit)
+                                case .stepCount: unit = .count(); value = sample.quantity.doubleValue(for: unit)
+                                case .heartRate: unit = HKUnit(from: "count/min"); value = sample.quantity.doubleValue(for: unit)
+                                case .activeEnergyBurned, .basalEnergyBurned: unit = .kilocalorie(); value = sample.quantity.doubleValue(for: unit)
+                                case .waistCircumference: unit = .meterUnit(with: .centi); value = sample.quantity.doubleValue(for: unit)
+                                default: unit = .count(); value = sample.quantity.doubleValue(for: unit)
                                 }
                                 entry.value = value
                                 
