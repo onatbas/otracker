@@ -137,6 +137,14 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
         chartView.xAxis.labelPosition = .bottom
         chartView.xAxis.labelRotationAngle = -45
         
+        // Configure x-axis to prevent duplicate labels
+        chartView.xAxis.granularity = 24 * 3600 // One day in seconds
+        chartView.xAxis.labelCount = 8
+        chartView.xAxis.forceLabelsEnabled = false
+        
+        // Set zoom limit to 12x
+        chartView.viewPortHandler.setMaximumScaleX(12.0)
+        
         // Create and configure the date formatter
         let dateFormatter = DateAxisValueFormatter()
         dateFormatter.chartView = chartView
@@ -172,10 +180,18 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
                     context.coordinator.healthKitSamples = samples
                     let sorted = samples.sorted { $0.endDate < $1.endDate }
                     context.coordinator.dates = sorted.map { $0.endDate }
+                    
+                    // Calculate zoom scale based on date range
+                    if let firstDate = sorted.first?.endDate, let lastDate = sorted.last?.endDate {
+                        let months = Calendar.current.dateComponents([.month], from: firstDate, to: lastDate).month ?? 0
+                        let maxZoom = Double(max(1, months + 1)) * 3.0
+                        uiView.viewPortHandler.setMaximumScaleX(maxZoom)
+                    }
+                    
                     if let formatter = uiView.xAxis.valueFormatter as? DateAxisValueFormatter {
                         formatter.dates = context.coordinator.dates
                     }
-                    let chartEntries = sorted.enumerated().map { (idx, sample) -> ChartDataEntry in
+                    let chartEntries = sorted.map { sample -> ChartDataEntry in
                         // Use kg for body mass, meters for height, etc.
                         let value: Double
                         switch hkId {
@@ -189,7 +205,7 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
                         case .waistCircumference: value = sample.quantity.doubleValue(for: .meterUnit(with: .centi))
                         default: value = sample.quantity.doubleValue(for: .count())
                         }
-                        let chartEntry = ChartDataEntry(x: Double(idx), y: value)
+                        let chartEntry = ChartDataEntry(x: sample.endDate.timeIntervalSince1970, y: value)
                         return chartEntry
                     }
                     if chartEntries.isEmpty {
@@ -202,9 +218,14 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
                         dataSet.circleRadius = 4
                         dataSet.drawValuesEnabled = false
                         dataSet.lineWidth = 2
-                        dataSet.mode = LineChartDataSet.Mode.cubicBezier
+                        dataSet.mode = .horizontalBezier
                         let data = LineChartData(dataSet: dataSet)
                         uiView.data = data
+                        
+                        // Configure x-axis after data is set
+                        uiView.xAxis.granularity = 24 * 3600  // One day in seconds
+                        uiView.xAxis.labelCount = 8
+                        uiView.xAxis.forceLabelsEnabled = false
                     }
                 }
             }
@@ -250,14 +271,23 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
             let validDays = dayToValues.filter { $0.value.keys.count == dependencies.count }
             let sortedDays = validDays.keys.sorted()
             context.coordinator.dates = sortedDays.compactMap { dayToDate[$0] }
+            
+            // Calculate zoom scale based on date range
+            if let firstDate = context.coordinator.dates.first, let lastDate = context.coordinator.dates.last {
+                let months = Calendar.current.dateComponents([.month], from: firstDate, to: lastDate).month ?? 0
+                let maxZoom = Double(max(1, months + 1)) * 3.0
+                uiView.viewPortHandler.setMaximumScaleX(maxZoom)
+            }
+            
             if let formatter = uiView.xAxis.valueFormatter as? DateAxisValueFormatter {
                 formatter.dates = context.coordinator.dates
             }
-            let chartEntries: [ChartDataEntry] = sortedDays.enumerated().map { (idx, dayStr) in
+            let chartEntries: [ChartDataEntry] = sortedDays.map { dayStr in
                 let values = validDays[dayStr]!
                 let expr = NSExpression(format: formula)
                 let result = expr.expressionValue(with: values, context: nil) as? Double ?? 0.0
-                let chartEntry = ChartDataEntry(x: Double(idx), y: result)
+                let date = dayToDate[dayStr]!
+                let chartEntry = ChartDataEntry(x: date.timeIntervalSince1970, y: result)
                 return chartEntry
             }
             let dataSet = LineChartDataSet(entries: chartEntries, label: type.name ?? "")
@@ -266,9 +296,14 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
             dataSet.circleRadius = 4
             dataSet.drawValuesEnabled = false
             dataSet.lineWidth = 2
-            dataSet.mode = LineChartDataSet.Mode.cubicBezier
+            dataSet.mode = .horizontalBezier
             let data = LineChartData(dataSet: dataSet)
             uiView.data = data
+            
+            // Configure x-axis after data is set
+            uiView.xAxis.granularity = 24 * 3600  // One day in seconds
+            uiView.xAxis.labelCount = 8
+            uiView.xAxis.forceLabelsEnabled = false
         } else {
             let request: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
             request.predicate = NSPredicate(format: "type == %@", type)
@@ -281,11 +316,19 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
             }
             let sorted = entries.sorted { ($0.timestamp ?? Date()) < ($1.timestamp ?? Date()) }
             context.coordinator.dates = sorted.compactMap { $0.timestamp }
+            
+            // Calculate zoom scale based on date range
+            if let firstDate = context.coordinator.dates.first, let lastDate = context.coordinator.dates.last {
+                let months = Calendar.current.dateComponents([.month], from: firstDate, to: lastDate).month ?? 0
+                let maxZoom = Double(max(1, months + 1)) * 3.0
+                uiView.viewPortHandler.setMaximumScaleX(maxZoom)
+            }
+            
             if let formatter = uiView.xAxis.valueFormatter as? DateAxisValueFormatter {
                 formatter.dates = context.coordinator.dates
             }
-            let chartEntries = sorted.enumerated().map { (idx, entry) -> ChartDataEntry in
-                let chartEntry = ChartDataEntry(x: Double(idx), y: entry.value)
+            let chartEntries = sorted.map { entry -> ChartDataEntry in
+                let chartEntry = ChartDataEntry(x: (entry.timestamp ?? Date()).timeIntervalSince1970, y: entry.value)
                 if let note = entry.note, !note.isEmpty {
                     chartEntry.data = note
                 }
@@ -297,9 +340,14 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
             dataSet.circleRadius = 4
             dataSet.drawValuesEnabled = false
             dataSet.lineWidth = 2
-            dataSet.mode = LineChartDataSet.Mode.cubicBezier
+            dataSet.mode = .horizontalBezier
             let data = LineChartData(dataSet: dataSet)
             uiView.data = data
+            
+            // Configure x-axis after data is set
+            uiView.xAxis.granularity = 24 * 3600  // One day in seconds
+            uiView.xAxis.labelCount = 8
+            uiView.xAxis.forceLabelsEnabled = false
         }
     }
 }
@@ -316,11 +364,23 @@ class DateAxisValueFormatter: NSObject, AxisValueFormatter {
     var dates: [Date] = []
     
     func stringForValue(_ value: Double, axis: AxisBase?) -> String {
-        let index = Int(round(value))
-        if index >= 0 && index < dates.count {
-            return dateFormatter.string(from: dates[index])
+        let date = Date(timeIntervalSince1970: value)
+        return dateFormatter.string(from: date)
+    }
+    
+    // Add method to generate all dates in range
+    func generateAllDates() -> [Date] {
+        guard let firstDate = dates.first, let lastDate = dates.last else { return dates }
+        
+        var allDates: [Date] = []
+        var currentDate = firstDate
+        
+        while currentDate <= lastDate {
+            allDates.append(currentDate)
+            currentDate = Calendar.current.date(byAdding: .day, value: 1, to: currentDate)!
         }
-        return ""
+        
+        return allDates
     }
 }
 
