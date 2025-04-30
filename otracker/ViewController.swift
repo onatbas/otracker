@@ -1975,6 +1975,7 @@ class ImagePreviewViewController: UIViewController {
     private let imageView = UIImageView()
     private let scrollView = UIScrollView()
     private let noteButton = UIButton(type: .system)
+    private let shareButton = UIButton(type: .system)
     private let noteLabel = UILabel()
     private let noteContainer = UIView()
     private var measurementEntry: MeasurementEntry?
@@ -2035,6 +2036,17 @@ class ImagePreviewViewController: UIViewController {
         NSLayoutConstraint.activate([
             noteButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
             noteButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16)
+        ])
+        
+        // Setup share button
+        shareButton.setImage(UIImage(systemName: "square.and.arrow.up"), for: .normal)
+        shareButton.tintColor = .white
+        shareButton.addTarget(self, action: #selector(shareButtonTapped), for: .touchUpInside)
+        view.addSubview(shareButton)
+        shareButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            shareButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            shareButton.trailingAnchor.constraint(equalTo: noteButton.leadingAnchor, constant: -16)
         ])
         
         // Setup note container
@@ -2116,6 +2128,17 @@ class ImagePreviewViewController: UIViewController {
         })
         
         present(alert, animated: true)
+    }
+    
+    @objc private func shareButtonTapped() {
+        guard let image = imageView.image else { return }
+        let activityVC = UIActivityViewController(activityItems: [image], applicationActivities: nil)
+        if let popover = activityVC.popoverPresentationController {
+            popover.sourceView = shareButton
+            popover.sourceRect = shareButton.bounds
+            popover.permittedArrowDirections = .any
+        }
+        present(activityVC, animated: true)
     }
 }
 
