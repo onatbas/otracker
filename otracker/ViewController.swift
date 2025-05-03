@@ -39,6 +39,11 @@ class MainTabBarController: UITabBarController {
         graphVC.tabBarItem = UITabBarItem(title: "Graph", image: UIImage(systemName: "chart.xyaxis.line"), tag: 3)
         let graphNav = UINavigationController(rootViewController: graphVC)
         
+        // Add Settings tab
+        let settingsVC = SettingsViewController()
+        settingsVC.tabBarItem = UITabBarItem(title: "Settings", image: UIImage(systemName: "gear"), tag: 4)
+        let settingsNav = UINavigationController(rootViewController: settingsVC)
+        
         // Configure navigation bar appearance for all navigation controllers
         let navAppearance = UINavigationBarAppearance()
         navAppearance.configureWithOpaqueBackground()
@@ -46,7 +51,7 @@ class MainTabBarController: UITabBarController {
         navAppearance.titleTextAttributes = [.foregroundColor: UIColor.label]
         navAppearance.largeTitleTextAttributes = [.foregroundColor: UIColor.label]
         
-        let navigationControllers = [categoriesNav, measurementsNav, calendarNav, graphNav]
+        let navigationControllers = [categoriesNav, measurementsNav, calendarNav, graphNav, settingsNav]
         for navController in navigationControllers {
             navController.navigationBar.standardAppearance = navAppearance
             navController.navigationBar.scrollEdgeAppearance = navAppearance
@@ -864,21 +869,12 @@ class CategoriesViewController: UIViewController {
         var allTypes: [MeasurementType] = []
         do {
             allTypes = try context.fetch(allTypesRequest)
-            print("\n=== All Types (including hidden) ===")
-            for type in allTypes {
-                print("- \(type.name ?? "Unknown"): visible=\(type.isVisible)")
-            }
         } catch {
-            print("Error fetching all types: \(error)")
+            return
         }
 
         // For Categories view, show all types regardless of visibility
         measurementTypes = allTypes
-        print("\n=== Categories View - Loaded Types ===")
-        print("Total types: \(measurementTypes.count)")
-        for type in measurementTypes {
-            print("- \(type.name ?? "Unknown"): visible=\(type.isVisible)")
-        }
         tableView.reloadData()
     }
     
@@ -1052,28 +1048,13 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
         var allTypes: [MeasurementType] = []
         do {
             allTypes = try context.fetch(allTypesRequest)
-            print("\n=== All Types (including hidden) ===")
-            for type in allTypes {
-                print("- \(type.name ?? "Unknown"): visible=\(type.isVisible)")
-            }
         } catch {
-            print("Error fetching all types: \(error)")
+            return
         }
 
-        // Then fetch only visible types for display
-        let visibleRequest: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
-        visibleRequest.predicate = NSPredicate(format: "isVisible == YES")
-        do {
-            measurementTypes = try context.fetch(visibleRequest)
-            print("\n=== Visible Types for Display ===")
-            print("Total visible types: \(measurementTypes.count)")
-            for type in measurementTypes {
-                print("- \(type.name ?? "Unknown"): visible=\(type.isVisible)")
-            }
-            tableView.reloadData()
-        } catch {
-            print("Error loading measurement types: \(error)")
-        }
+        // For Measurements view, only show visible types
+        measurementTypes = allTypes.filter { $0.isVisible }
+        tableView.reloadData()
     }
     
     private func addMeasurement(for type: MeasurementType) {
@@ -1183,31 +1164,6 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
         } else {
             expandedSections.insert(section)
             let type = measurementTypes[section]
-            print("\n=== Expanding Section: \(type.name ?? "Unknown") ===")
-            print("Type Details:")
-            print("- Unit: \(type.unit ?? "None")")
-            print("- HealthKit ID: \(type.healthKitIdentifier ?? "None")")
-            print("- Is Formula: \(type.isFormula)")
-            if type.isFormula {
-                print("- Formula: \(type.formula ?? "None")")
-                print("- Dependencies: \(type.dependencies ?? "None")")
-            }
-            
-            // Log Core Data entries
-            if let entries = type.entries?.allObjects as? [MeasurementEntry] {
-                print("\nCore Data Entries (\(entries.count)):")
-                let sortedEntries = entries.sorted { ($0.timestamp ?? Date.distantPast) > ($1.timestamp ?? Date.distantPast) }
-                for (index, entry) in sortedEntries.enumerated() {
-                    print("Entry \(index + 1):")
-                    print("- Value: \(entry.value)")
-                    print("- Timestamp: \(entry.timestamp?.description ?? "None")")
-                    if type.unit == "Picture" {
-                        print("- Has Image: \(entry.image != nil)")
-                    }
-                }
-            } else {
-                print("\nNo Core Data entries found")
-            }
             
             // If this is a formula type, fetch HealthKit data for all dependencies first
             if type.isFormula, let dependencies = type.dependencies?.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) {
@@ -1246,17 +1202,12 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
     private func calculateFormulaValues(for type: MeasurementType, section: Int, dependencies: [String]) {
         guard let formula = type.formula else { return }
         
-        print("\nFormula Values:")
-        print("- Dependencies: \(dependencies)")
-        print("- Formula: \(formula)")
-        
         // Fetch all types again to get dependencies regardless of visibility
         let request: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
         var allTypes: [MeasurementType] = []
         do {
             allTypes = try context.fetch(request)
         } catch {
-            print("Error fetching all types for formula: \(error)")
             return
         }
         
@@ -1269,12 +1220,6 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
                 // Get Core Data entries
                 if let entries = depType.entries?.allObjects as? [MeasurementEntry] {
                     depEntries[depName] = entries.sorted { ($0.timestamp ?? Date.distantPast) < ($1.timestamp ?? Date.distantPast) }
-                    print("\nFound \(entries.count) Core Data entries for \(depName):")
-                    for entry in entries {
-                        if let date = entry.timestamp {
-                            print("- \(date): \(entry.value)")
-                        }
-                    }
                 }
                 
                 // Get HealthKit samples if applicable
@@ -1282,24 +1227,6 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
                     let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
                     let samples = healthKitSamplesBySection[section] ?? []
                     depHealthKitSamples[depName] = samples
-                    print("\nFound \(samples.count) HealthKit samples for \(depName):")
-                    for sample in samples {
-                        // Determine the correct HKUnit for the type
-                        let unit: HKUnit
-                        switch hkId {
-                        case .bodyMass: unit = .gramUnit(with: .kilo)
-                        case .height: unit = .meter()
-                        case .bodyFatPercentage: unit = .percent()
-                        case .bodyMassIndex: unit = .count()
-                        case .stepCount: unit = .count()
-                        case .heartRate: unit = HKUnit(from: "count/min")
-                        case .activeEnergyBurned, .basalEnergyBurned: unit = .kilocalorie()
-                        case .waistCircumference: unit = .meterUnit(with: .centi)
-                        default: unit = .count()
-                        }
-                        let value = sample.quantity.doubleValue(for: unit)
-                        print("- \(sample.endDate): \(value)")
-                    }
                 }
             }
         }
@@ -1412,12 +1339,6 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
         
         formulaValuesBySection[section] = validDays
         
-        print("\nValid days with all dependencies: \(validDays.count)")
-        for (day, values) in validDays {
-            let result = evaluateFormula(formula, values: values)
-            print("- \(day): \(result) (values: \(values))")
-        }
-        
         DispatchQueue.main.async { [weak self] in
             self?.tableView.reloadSections(IndexSet(integer: section), with: .automatic)
         }
@@ -1443,22 +1364,8 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
     }
     
     private func fetchHealthKitSamples(for identifier: HKQuantityTypeIdentifier, section: Int, completion: (() -> Void)? = nil) {
-        print("\n=== Fetching HealthKit Samples ===")
-        print("Type: \(identifier.rawValue)")
-        print("Section: \(section)")
-        
         HealthKitManager.shared.fetchAllQuantitySamples(for: identifier) { [weak self] samples in
             DispatchQueue.main.async {
-                print("\nHealthKit Samples Received:")
-                print("Total samples: \(samples.count)")
-                
-                // Log sample details
-                for (index, sample) in samples.enumerated() {
-                    print("Sample \(index + 1):")
-                    print("- Value: \(String(describing: sample.quantity.doubleValue))")
-                    print("- Date: \(sample.endDate)")
-                }
-                
                 self?.healthKitSamplesBySection[section] = samples
                 completion?()
             }
@@ -1478,7 +1385,6 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
             let result = try evaluator.evaluate(expression)
             return result
         } catch {
-            print("Error evaluating formula: \(error)")
             return 0.0
         }
     }
@@ -1881,15 +1787,8 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
     
     func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
         let type = measurementTypes[indexPath.section]
-        print("\n=== Attempting to delete measurement ===")
-        print("Section: \(indexPath.section)")
-        print("Row: \(indexPath.row)")
-        print("Type: \(type.name ?? "Unknown")")
-        print("Is Formula: \(type.isFormula)")
-        print("HealthKit ID: \(type.healthKitIdentifier ?? "None")")
         
         if type.isFormula {
-            print("Cannot delete formula rows")
             return
         }
         
@@ -1900,24 +1799,17 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
                 let sortedSamples = samples.sorted { $0.endDate > $1.endDate }
                 
                 guard indexPath.row < sortedSamples.count else {
-                    print("Invalid row index for HealthKit samples")
                     return
                 }
                 
                 let sample = sortedSamples[indexPath.row]
-                print("\nDeleting HealthKit sample:")
-                print("- End Date: \(sample.endDate)")
-                print("- Value: \(sample.quantity)")
                 
                 let hkId = HKQuantityTypeIdentifier(rawValue: healthKitIdentifier)
                 healthKitManager.deleteQuantitySample(identifier: hkId, date: sample.endDate) { [weak self] (success: Bool, error: Error?) in
                     DispatchQueue.main.async {
                         guard let self = self else { return }
                         
-                        if let error = error {
-                            print("Error deleting from HealthKit: \(error)")
-                        } else if success {
-                            print("Successfully deleted from HealthKit")
+                        if success {
                             self.tableView.reloadData()
                         }
                     }
@@ -1927,21 +1819,14 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
                 if let entries = type.entries?.allObjects as? [MeasurementEntry] {
                     let sortedEntries = entries.sorted { ($0.timestamp ?? Date.distantPast) > ($1.timestamp ?? Date.distantPast) }
                     let entry = sortedEntries[indexPath.row]
-                    print("\nDeleting Core Data entry:")
-                    print("- Value: \(entry.value)")
-                    print("- Timestamp: \(entry.timestamp?.description ?? "None")")
                     
                     context.delete(entry)
                     do {
                         try context.save()
-                        print("Successfully deleted from Core Data")
                         loadMeasurementTypes()
                         tableView.reloadData()
                     } catch {
-                        print("Error deleting measurement entry: \(error)")
                     }
-                } else {
-                    print("No entries found to delete")
                 }
             }
         }

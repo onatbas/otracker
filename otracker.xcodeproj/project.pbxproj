@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		681DE9B62DBDE9DE00565535 /* MathParser in Frameworks */ = {isa = PBXBuildFile; productRef = 681DE9B52DBDE9DE00565535 /* MathParser */; };
 		681F00DF2DBD8872007838C4 /* DGCharts in Frameworks */ = {isa = PBXBuildFile; productRef = 681F00DE2DBD8872007838C4 /* DGCharts */; };
+		68AE99B42DC6D973006E8708 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 68AE99B32DC6D973006E8708 /* ZIPFoundation */; };
 		68D3492A2DBD699500AC81FE /* FSCalendar in Frameworks */ = {isa = PBXBuildFile; productRef = 68D349292DBD699500AC81FE /* FSCalendar */; };
 /* End PBXBuildFile section */
 
@@ -74,6 +75,7 @@
 				681F00DF2DBD8872007838C4 /* DGCharts in Frameworks */,
 				681DE9B62DBDE9DE00565535 /* MathParser in Frameworks */,
 				68D3492A2DBD699500AC81FE /* FSCalendar in Frameworks */,
+				68AE99B42DC6D973006E8708 /* ZIPFoundation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -137,6 +139,7 @@
 				68D349292DBD699500AC81FE /* FSCalendar */,
 				681F00DE2DBD8872007838C4 /* DGCharts */,
 				681DE9B52DBDE9DE00565535 /* MathParser */,
+				68AE99B32DC6D973006E8708 /* ZIPFoundation */,
 			);
 			productName = otracker;
 			productReference = 6808D4CC2DBD54D40069C150 /* otracker.app */;
@@ -224,6 +227,7 @@
 				68D349282DBD699500AC81FE /* XCRemoteSwiftPackageReference "FSCalendar" */,
 				681F00DD2DBD8872007838C4 /* XCRemoteSwiftPackageReference "Charts" */,
 				681DE9B42DBDE9DE00565535 /* XCRemoteSwiftPackageReference "DDMathParser" */,
+				68AE99B22DC6D973006E8708 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6808D4CD2DBD54D40069C150 /* Products */;
@@ -608,6 +612,14 @@
 				minimumVersion = 5.1.0;
 			};
 		};
+		68AE99B22DC6D973006E8708 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/weichsel/ZIPFoundation";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.19;
+			};
+		};
 		68D349282DBD699500AC81FE /* XCRemoteSwiftPackageReference "FSCalendar" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/WenchaoD/FSCalendar";
@@ -628,6 +640,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 681F00DD2DBD8872007838C4 /* XCRemoteSwiftPackageReference "Charts" */;
 			productName = DGCharts;
+		};
+		68AE99B32DC6D973006E8708 /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 68AE99B22DC6D973006E8708 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
 		};
 		68D349292DBD699500AC81FE /* FSCalendar */ = {
 			isa = XCSwiftPackageProductDependency;

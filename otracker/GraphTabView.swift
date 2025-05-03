@@ -524,7 +524,7 @@ struct PictureGalleryView: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 16) {
-                ForEach(entries.sorted(by: { ($0.timestamp ?? Date()) < ($1.timestamp ?? Date()) }), id: \.self) { entry in
+                ForEach(entries.sorted(by: { ($0.timestamp ?? Date()) > ($1.timestamp ?? Date()) }), id: \.self) { entry in
                     if let imageData = entry.image, let uiImage = UIImage(data: imageData) {
                         VStack {
                             Image(uiImage: uiImage)
