@@ -1863,49 +1863,67 @@ extension MeasurementsViewController: UITableViewDelegate, UITableViewDataSource
     
     func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
         let type = measurementTypes[indexPath.section]
+        print("\n=== Attempting to delete measurement ===")
+        print("Section: \(indexPath.section)")
+        print("Row: \(indexPath.row)")
+        print("Type: \(type.name ?? "Unknown")")
+        print("Is Formula: \(type.isFormula)")
+        print("HealthKit ID: \(type.healthKitIdentifier ?? "None")")
+        
         if type.isFormula {
-            // Do not allow deleting formula rows
+            print("Cannot delete formula rows")
             return
         }
+        
         if editingStyle == .delete {
-            if let entries = type.entries?.allObjects as? [MeasurementEntry] {
-                let sortedEntries = entries.sorted { ($0.timestamp ?? Date.distantPast) > ($1.timestamp ?? Date.distantPast) }
-                let entry = sortedEntries[indexPath.row]
+            // For HealthKit-linked types, use HealthKit samples directly
+            if let healthKitIdentifier = type.healthKitIdentifier {
+                let samples = healthKitSamplesBySection[indexPath.section] ?? []
+                let sortedSamples = samples.sorted { $0.endDate > $1.endDate }
                 
-                // If the measurement type is linked to HealthKit, delete from HealthKit only
-                if let healthKitIdentifier = type.healthKitIdentifier,
-                   let date = entry.timestamp {
-                    let hkId = HKQuantityTypeIdentifier(rawValue: healthKitIdentifier)
-                    
-                    // Get the corresponding HealthKit sample
-                    let samples = healthKitSamplesBySection[indexPath.section] ?? []
-                    if let matchingSample = samples.first(where: { 
-                        Calendar.current.isDate($0.endDate, inSameDayAs: date) &&
-                        abs($0.endDate.timeIntervalSince(date)) < 60 // Within 1 minute
-                    }) {
-                        healthKitManager.deleteQuantitySample(identifier: hkId, date: matchingSample.endDate) { [weak self] (success: Bool, error: Error?) in
-                            DispatchQueue.main.async {
-                                guard let self = self else { return }
-                                
-                                if let error = error {
-                                    print("Error deleting from HealthKit: \(error)")
-                                }
-                                
-                                // Reload the table view to ensure consistency
-                                self.tableView.reloadData()
-                            }
+                guard indexPath.row < sortedSamples.count else {
+                    print("Invalid row index for HealthKit samples")
+                    return
+                }
+                
+                let sample = sortedSamples[indexPath.row]
+                print("\nDeleting HealthKit sample:")
+                print("- End Date: \(sample.endDate)")
+                print("- Value: \(sample.quantity)")
+                
+                let hkId = HKQuantityTypeIdentifier(rawValue: healthKitIdentifier)
+                healthKitManager.deleteQuantitySample(identifier: hkId, date: sample.endDate) { [weak self] (success: Bool, error: Error?) in
+                    DispatchQueue.main.async {
+                        guard let self = self else { return }
+                        
+                        if let error = error {
+                            print("Error deleting from HealthKit: \(error)")
+                        } else if success {
+                            print("Successfully deleted from HealthKit")
+                            self.tableView.reloadData()
                         }
                     }
-                } else {
-                    // For non-HealthKit entries, delete from Core Data
+                }
+            } else {
+                // For non-HealthKit types, use Core Data entries
+                if let entries = type.entries?.allObjects as? [MeasurementEntry] {
+                    let sortedEntries = entries.sorted { ($0.timestamp ?? Date.distantPast) > ($1.timestamp ?? Date.distantPast) }
+                    let entry = sortedEntries[indexPath.row]
+                    print("\nDeleting Core Data entry:")
+                    print("- Value: \(entry.value)")
+                    print("- Timestamp: \(entry.timestamp?.description ?? "None")")
+                    
                     context.delete(entry)
                     do {
                         try context.save()
+                        print("Successfully deleted from Core Data")
                         loadMeasurementTypes()
                         tableView.reloadData()
                     } catch {
                         print("Error deleting measurement entry: \(error)")
                     }
+                } else {
+                    print("No entries found to delete")
                 }
             }
         }
