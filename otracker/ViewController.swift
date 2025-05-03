@@ -1018,6 +1018,7 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
         super.viewDidLoad()
         setupUI()
         loadMeasurementTypes()
+        preloadHealthKitData()
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -1654,6 +1655,23 @@ class MeasurementsViewController: UIViewController, UIImagePickerControllerDeleg
             tableView.reloadData()
         } catch {
             print("Error fetching measurement types: \(error)")
+        }
+    }
+
+    private func preloadHealthKitData() {
+        for (index, type) in measurementTypes.enumerated() {
+            if let hkIdStr = type.healthKitIdentifier {
+                let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
+                HealthKitManager.shared.fetchAllQuantitySamples(for: hkId) { [weak self] samples in
+                    guard let self = self else { return }
+                    DispatchQueue.main.async {
+                        self.healthKitSamplesBySection[index] = samples
+                        if self.expandedSections.contains(index) {
+                            self.tableView.reloadSections(IndexSet(integer: index), with: .automatic)
+                        }
+                    }
+                }
+            }
         }
     }
 }
