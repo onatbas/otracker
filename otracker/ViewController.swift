@@ -921,8 +921,8 @@ extension CategoriesViewController: UITableViewDelegate, UITableViewDataSource {
         }
         if measurementType.isFormula {
             content.text = "\(measurementType.name ?? "") (fx)"
-            content.secondaryText = "Formula: \(measurementType.formula ?? "")\nUnit: \(measurementType.unit ?? "")"
-            content.image = UIImage(systemName: "function")
+     //       content.secondaryText = "Formula: \(measurementType.formula ?? "")\nUnit: \(measurementType.unit ?? "")"
+    //        content.image = UIImage(systemName: "function")
         }
         cell.contentConfiguration = content
         
