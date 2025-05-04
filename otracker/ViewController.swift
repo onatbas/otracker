@@ -111,6 +111,7 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate, UIPicker
     private let healthKitPicker = UIPickerView()
     private let healthKitLabel = UILabel()
     private let linkHealthButton = UIButton(type: .system)
+    private let healthKitCheckmark = UIImageView()
     private var healthKitPickerVisible = false
     private let completion: (String, String, UIColor, Bool, String?, String?, String?) -> Void
     private let formulaSwitch = UISwitch()
@@ -252,6 +253,14 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate, UIPicker
         linkHealthButton.translatesAutoresizingMaskIntoConstraints = false
         linkHealthButton.addTarget(self, action: #selector(linkHealthTapped), for: .touchUpInside)
         
+        // HealthKit checkmark
+        healthKitCheckmark.image = UIImage(systemName: "checkmark.circle.fill")
+        healthKitCheckmark.tintColor = .systemGreen
+        healthKitCheckmark.translatesAutoresizingMaskIntoConstraints = false
+        healthKitCheckmark.isHidden = selectedHealthKitTypeIndex == 0 // Hide if "None" is selected
+        
+        view.addSubview(healthKitCheckmark)
+        
         // HealthKit picker and label (hidden by default)
         healthKitLabel.text = "Apple Health Data Type (optional)"
         healthKitLabel.font = .systemFont(ofSize: 16, weight: .medium)
@@ -314,6 +323,11 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate, UIPicker
             linkHealthButton.topAnchor.constraint(equalTo: colorGridStack.bottomAnchor, constant: 24),
             linkHealthButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             
+            healthKitCheckmark.centerYAnchor.constraint(equalTo: linkHealthButton.centerYAnchor),
+            healthKitCheckmark.leadingAnchor.constraint(equalTo: linkHealthButton.trailingAnchor, constant: 8),
+            healthKitCheckmark.widthAnchor.constraint(equalToConstant: 20),
+            healthKitCheckmark.heightAnchor.constraint(equalToConstant: 20),
+            
             healthKitLabel.topAnchor.constraint(equalTo: linkHealthButton.bottomAnchor, constant: 12),
             healthKitLabel.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
             healthKitPicker.topAnchor.constraint(equalTo: healthKitLabel.bottomAnchor, constant: 8),
@@ -321,7 +335,7 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate, UIPicker
             healthKitPicker.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
             healthKitPicker.heightAnchor.constraint(equalToConstant: 100),
             
-            formulaLabel.topAnchor.constraint(equalTo: healthKitPicker.bottomAnchor, constant: 24),
+            formulaLabel.topAnchor.constraint(equalTo: linkHealthButton.bottomAnchor, constant: 24),
             formulaLabel.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
             formulaSwitch.centerYAnchor.constraint(equalTo: formulaLabel.centerYAnchor),
             formulaSwitch.leadingAnchor.constraint(equalTo: formulaLabel.trailingAnchor, constant: 12),
@@ -342,9 +356,37 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate, UIPicker
     }
     
     @objc private func linkHealthTapped() {
-        healthKitPickerVisible.toggle()
-        healthKitLabel.isHidden = !healthKitPickerVisible
-        healthKitPicker.isHidden = !healthKitPickerVisible
+        let pickerVC = UIViewController()
+        pickerVC.view.backgroundColor = .systemBackground
+        pickerVC.title = "Select Health Data Type"
+        
+        let picker = UIPickerView()
+        picker.dataSource = self
+        picker.delegate = self
+        picker.selectRow(selectedHealthKitTypeIndex, inComponent: 0, animated: false)
+        picker.translatesAutoresizingMaskIntoConstraints = false
+        
+        let doneButton = UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(healthKitPickerDone))
+        pickerVC.navigationItem.rightBarButtonItem = doneButton
+        
+        let nav = UINavigationController(rootViewController: pickerVC)
+        nav.modalPresentationStyle = .pageSheet
+        if let sheet = nav.sheetPresentationController {
+            sheet.detents = [.medium()]
+        }
+        
+        pickerVC.view.addSubview(picker)
+        NSLayoutConstraint.activate([
+            picker.centerXAnchor.constraint(equalTo: pickerVC.view.centerXAnchor),
+            picker.centerYAnchor.constraint(equalTo: pickerVC.view.centerYAnchor)
+        ])
+        
+        present(nav, animated: true)
+    }
+    
+    @objc private func healthKitPickerDone() {
+        healthKitCheckmark.isHidden = selectedHealthKitTypeIndex == 0
+        dismiss(animated: true)
     }
     
     @objc private func unitSelected(_ sender: UIButton) {
@@ -428,6 +470,7 @@ class AddCategoryViewController: UIViewController, UITextFieldDelegate, UIPicker
     
     func pickerView(_ pickerView: UIPickerView, didSelectRow row: Int, inComponent component: Int) {
         selectedHealthKitTypeIndex = row
+        healthKitCheckmark.isHidden = row == 0
     }
 }
 
@@ -468,6 +511,7 @@ class EditCategoryViewController: UIViewController, UITextFieldDelegate, UIPicke
     private let healthKitPicker = UIPickerView()
     private let healthKitLabel = UILabel()
     private let linkHealthButton = UIButton(type: .system)
+    private let healthKitCheckmark = UIImageView()
     private var healthKitPickerVisible = false
     private let completion: (MeasurementType) -> Void
     private let formulaSwitch = UISwitch()
@@ -521,6 +565,9 @@ class EditCategoryViewController: UIViewController, UITextFieldDelegate, UIPicke
             selectedHealthKitTypeIndex = healthKitTypes.firstIndex { $0.identifier == hkId } ?? 0
         }
         healthKitPicker.selectRow(selectedHealthKitTypeIndex, inComponent: 0, animated: false)
+        
+        // Set initial checkmark visibility
+        healthKitCheckmark.isHidden = selectedHealthKitTypeIndex == 0
         
         // Add Done button to navigation bar
         navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(saveButtonTapped))
@@ -635,6 +682,14 @@ class EditCategoryViewController: UIViewController, UITextFieldDelegate, UIPicke
         linkHealthButton.translatesAutoresizingMaskIntoConstraints = false
         linkHealthButton.addTarget(self, action: #selector(linkHealthTapped), for: .touchUpInside)
         
+        // HealthKit checkmark
+        healthKitCheckmark.image = UIImage(systemName: "checkmark.circle.fill")
+        healthKitCheckmark.tintColor = .systemGreen
+        healthKitCheckmark.translatesAutoresizingMaskIntoConstraints = false
+        healthKitCheckmark.isHidden = selectedHealthKitTypeIndex == 0 // Hide if "None" is selected
+        
+        view.addSubview(healthKitCheckmark)
+        
         // HealthKit picker and label (hidden by default)
         healthKitLabel.text = "Apple Health Data Type (optional)"
         healthKitLabel.font = .systemFont(ofSize: 16, weight: .medium)
@@ -697,6 +752,11 @@ class EditCategoryViewController: UIViewController, UITextFieldDelegate, UIPicke
             linkHealthButton.topAnchor.constraint(equalTo: colorGridStack.bottomAnchor, constant: 24),
             linkHealthButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             
+            healthKitCheckmark.centerYAnchor.constraint(equalTo: linkHealthButton.centerYAnchor),
+            healthKitCheckmark.leadingAnchor.constraint(equalTo: linkHealthButton.trailingAnchor, constant: 8),
+            healthKitCheckmark.widthAnchor.constraint(equalToConstant: 20),
+            healthKitCheckmark.heightAnchor.constraint(equalToConstant: 20),
+            
             healthKitLabel.topAnchor.constraint(equalTo: linkHealthButton.bottomAnchor, constant: 12),
             healthKitLabel.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
             healthKitPicker.topAnchor.constraint(equalTo: healthKitLabel.bottomAnchor, constant: 8),
@@ -704,7 +764,7 @@ class EditCategoryViewController: UIViewController, UITextFieldDelegate, UIPicke
             healthKitPicker.trailingAnchor.constraint(equalTo: nameTextField.trailingAnchor),
             healthKitPicker.heightAnchor.constraint(equalToConstant: 100),
             
-            formulaLabel.topAnchor.constraint(equalTo: healthKitPicker.bottomAnchor, constant: 24),
+            formulaLabel.topAnchor.constraint(equalTo: linkHealthButton.bottomAnchor, constant: 24),
             formulaLabel.leadingAnchor.constraint(equalTo: nameTextField.leadingAnchor),
             formulaSwitch.centerYAnchor.constraint(equalTo: formulaLabel.centerYAnchor),
             formulaSwitch.leadingAnchor.constraint(equalTo: formulaLabel.trailingAnchor, constant: 12),
@@ -725,9 +785,37 @@ class EditCategoryViewController: UIViewController, UITextFieldDelegate, UIPicke
     }
     
     @objc private func linkHealthTapped() {
-        healthKitPickerVisible.toggle()
-        healthKitLabel.isHidden = !healthKitPickerVisible
-        healthKitPicker.isHidden = !healthKitPickerVisible
+        let pickerVC = UIViewController()
+        pickerVC.view.backgroundColor = .systemBackground
+        pickerVC.title = "Select Health Data Type"
+        
+        let picker = UIPickerView()
+        picker.dataSource = self
+        picker.delegate = self
+        picker.selectRow(selectedHealthKitTypeIndex, inComponent: 0, animated: false)
+        picker.translatesAutoresizingMaskIntoConstraints = false
+        
+        let doneButton = UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(healthKitPickerDone))
+        pickerVC.navigationItem.rightBarButtonItem = doneButton
+        
+        let nav = UINavigationController(rootViewController: pickerVC)
+        nav.modalPresentationStyle = .pageSheet
+        if let sheet = nav.sheetPresentationController {
+            sheet.detents = [.medium()]
+        }
+        
+        pickerVC.view.addSubview(picker)
+        NSLayoutConstraint.activate([
+            picker.centerXAnchor.constraint(equalTo: pickerVC.view.centerXAnchor),
+            picker.centerYAnchor.constraint(equalTo: pickerVC.view.centerYAnchor)
+        ])
+        
+        present(nav, animated: true)
+    }
+    
+    @objc private func healthKitPickerDone() {
+        healthKitCheckmark.isHidden = selectedHealthKitTypeIndex == 0
+        dismiss(animated: true)
     }
     
     @objc private func unitSelected(_ sender: UIButton) {
@@ -817,6 +905,7 @@ class EditCategoryViewController: UIViewController, UITextFieldDelegate, UIPicke
     
     func pickerView(_ pickerView: UIPickerView, didSelectRow row: Int, inComponent component: Int) {
         selectedHealthKitTypeIndex = row
+        healthKitCheckmark.isHidden = row == 0
     }
 }
 
