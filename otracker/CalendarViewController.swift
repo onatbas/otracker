@@ -7,6 +7,7 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
     private var calendar: FSCalendar!
     private var tableView: UITableView!
     private var measurementsByDate: [Date: [(UIColor, MeasurementEntry)]] = [:]
+    private var calendarDotsByDate: [Date: [(UIColor, MeasurementType)]] = [:]
     private var selectedMeasurements: [Any] = [] // Can be MeasurementEntry or FormulaResult
     private var allMeasurementTypes: [MeasurementType] = []
     private let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
@@ -111,11 +112,15 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
         
         // Clear existing measurements
         measurementsByDate = [:]
+        calendarDotsByDate = [:]
         
         // Fetch Core Data entries for non-HealthKit types
         let requestEntries: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
         do {
             let entries = try context.fetch(requestEntries)
+            // Group entries by date and type for calendar dots
+            var typesByDate: [Date: Set<MeasurementType>] = [:]
+            
             for entry in entries {
                 guard let timestamp = entry.timestamp, 
                       let type = entry.type, 
@@ -125,11 +130,26 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
                 // Skip HealthKit-linked types
                 if type.healthKitIdentifier != nil { continue }
                 let day = dateFormatter.date(from: dateFormatter.string(from: timestamp))!
+                
+                // Add to calendar dots (one per type)
+                if typesByDate[day] == nil {
+                    typesByDate[day] = Set()
+                }
+                typesByDate[day]?.insert(type)
+                
+                // Add to measurements list (all entries)
                 let color = UIColor(hex: colorHex)
                 if measurementsByDate[day] != nil {
                     measurementsByDate[day]?.append((color, entry))
                 } else {
                     measurementsByDate[day] = [(color, entry)]
+                }
+            }
+            
+            // Convert types to calendar dots format
+            for (day, types) in typesByDate {
+                calendarDotsByDate[day] = types.map { type in
+                    (UIColor(hex: type.color!), type)
                 }
             }
         } catch {
@@ -146,10 +166,31 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
                     defer { group.leave() }
                     guard let self = self else { return }
                     DispatchQueue.main.async {
+                        // Group samples by day
+                        var samplesByDay: [Date: HKQuantitySample] = [:]
                         for sample in samples {
                             let day = self.dateFormatter.date(from: self.dateFormatter.string(from: sample.endDate))!
+                            if let existingSample = samplesByDay[day] {
+                                if sample.endDate > existingSample.endDate {
+                                    samplesByDay[day] = sample
+                                }
+                            } else {
+                                samplesByDay[day] = sample
+                            }
+                        }
+                        
+                        // Add one entry per day for calendar dots
+                        for (day, sample) in samplesByDay {
                             if let colorHex = type.color {
                                 let color = UIColor(hex: colorHex)
+                                
+                                // Add to calendar dots
+                                if self.calendarDotsByDate[day] != nil {
+                                    self.calendarDotsByDate[day]?.append((color, type))
+                                } else {
+                                    self.calendarDotsByDate[day] = [(color, type)]
+                                }
+                                
                                 // Create a temporary MeasurementEntry for display purposes only
                                 let entry = MeasurementEntry(context: self.context)
                                 entry.timestamp = sample.endDate
@@ -171,6 +212,7 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
                                 }
                                 entry.value = value
                                 
+                                // Add to measurements list
                                 if self.measurementsByDate[day] != nil {
                                     self.measurementsByDate[day]?.append((color, entry))
                                 } else {
@@ -244,12 +286,12 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
     // MARK: - FSCalendarDataSource/Delegate
     func calendar(_ calendar: FSCalendar, numberOfEventsFor date: Date) -> Int {
         let day = dateFormatter.date(from: dateFormatter.string(from: date))!
-        return measurementsByDate[day]?.count ?? 0
+        return calendarDotsByDate[day]?.count ?? 0
     }
     
     func calendar(_ calendar: FSCalendar, appearance: FSCalendarAppearance, eventDefaultColorsFor date: Date) -> [UIColor]? {
         let day = dateFormatter.date(from: dateFormatter.string(from: date))!
-        return measurementsByDate[day]?.map { $0.0 }
+        return calendarDotsByDate[day]?.map { $0.0 }
     }
     
     func calendar(_ calendar: FSCalendar, didSelect date: Date, at monthPosition: FSCalendarMonthPosition) {
