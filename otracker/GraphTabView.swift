@@ -83,6 +83,7 @@ struct GraphTabView: View {
                     } else {
                         DGLineChartViewRepresentable(type: type)
                             .frame(height: 220)
+                            .id(type.objectID)
                     }
                 } else {
                     Text("No categories available.")
@@ -122,9 +123,63 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
     let type: MeasurementType
     @Environment(\.managedObjectContext) private var context
     
-    class Coordinator {
-        var healthKitSamples: [HKQuantitySample] = []
-        var dates: [Date] = []
+    class Coordinator: NSObject, ChartViewDelegate {
+        var chartView: LineChartView?
+        var allEntries: [ChartDataEntry] = []
+        private var updateTimer: Timer?
+        
+        func chartTranslated(_ chartView: ChartViewBase, dX: CGFloat, dY: CGFloat) {
+            scheduleAxisUpdate()
+        }
+        
+        func chartScaled(_ chartView: ChartViewBase, scaleX: CGFloat, scaleY: CGFloat) {
+            scheduleAxisUpdate()
+        }
+        
+        private func scheduleAxisUpdate() {
+            // Cancel any existing timer
+            updateTimer?.invalidate()
+            
+            // Create a new timer that will fire after 1 second
+            updateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+                self?.updateAxisLimits()
+            }
+        }
+        
+        func updateAxisLimits() {
+            guard let chartView = chartView else { return }
+            
+            // Store current viewport position
+            let currentXMin = chartView.lowestVisibleX
+            let currentXMax = chartView.highestVisibleX
+            
+            // Get visible entries
+            let visibleEntries = allEntries.filter { entry in
+                let xPos = chartView.getTransformer(forAxis: .left).pixelForValues(x: entry.x, y: entry.y).x
+                return xPos >= 0 && xPos <= chartView.bounds.width
+            }
+            
+            if !visibleEntries.isEmpty {
+                let values = visibleEntries.map { $0.y }
+                if let min = values.min(), let max = values.max() {
+                    let padding = 10.0
+                    chartView.leftAxis.axisMinimum = min - padding
+                    chartView.leftAxis.axisMaximum = max + padding
+                    
+                    // Update data and force complete redraw
+                    chartView.data?.notifyDataChanged()
+                    chartView.notifyDataSetChanged()
+                    chartView.setNeedsDisplay()
+                    
+                    // Move to current position
+                    chartView.moveViewToX(currentXMin)
+                }
+            }
+        }
+        
+        deinit {
+            updateTimer?.invalidate()
+        }
     }
     
     func makeCoordinator() -> Coordinator {
@@ -136,6 +191,10 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
         chartView.rightAxis.enabled = false
         chartView.xAxis.labelPosition = .bottom
         chartView.xAxis.labelRotationAngle = -45
+        
+        // Enable adaptive vertical scaling with padding
+        chartView.autoScaleMinMaxEnabled = false // Disable auto scaling to set our own min/max
+        chartView.leftAxis.granularityEnabled = true // Enable granularity for cleaner labels
         
         // Configure x-axis to prevent duplicate labels
         chartView.xAxis.granularity = 24 * 3600 // One day in seconds
@@ -169,31 +228,44 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
         marker.minimumSize = CGSize(width: 80, height: 40)
         chartView.marker = marker
         
+        // Set up delegate
+        chartView.delegate = context.coordinator
+        context.coordinator.chartView = chartView
+        
         return chartView
     }
     
     func updateUIView(_ uiView: LineChartView, context: Context) {
+        // Always clear chart data before updating to prevent unit conversion issues
+        uiView.data = nil
+        uiView.notifyDataSetChanged()
+        
         if let hkIdStr = type.healthKitIdentifier {
             let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
-            HealthKitManager.shared.fetchAllQuantitySamples(for: hkId) { samples in
+            
+            // Fetch all data from the beginning
+            let endDate = Date()
+            let startDate = Calendar.current.date(byAdding: .year, value: -10, to: endDate)! // Fetch up to 10 years of data
+            
+            HealthKitManager.shared.fetchQuantitySamples(for: hkId, startDate: startDate, endDate: endDate) { samples in
                 DispatchQueue.main.async {
-                    context.coordinator.healthKitSamples = samples
                     let sorted = samples.sorted { $0.endDate < $1.endDate }
-                    context.coordinator.dates = sorted.map { $0.endDate }
+                    let dates = sorted.map { $0.endDate }
                     
                     // Calculate zoom scale based on date range
-                    if let firstDate = sorted.first?.endDate, let lastDate = sorted.last?.endDate {
+                    if let firstDate = dates.first, let lastDate = dates.last {
                         let months = Calendar.current.dateComponents([.month], from: firstDate, to: lastDate).month ?? 0
                         let maxZoom = Double(max(1, months + 1)) * 3.0
                         uiView.viewPortHandler.setMaximumScaleX(maxZoom)
                     }
                     
                     if let formatter = uiView.xAxis.valueFormatter as? DateAxisValueFormatter {
-                        formatter.dates = context.coordinator.dates
+                        formatter.dates = dates
                     }
+                    
                     let chartEntries = sorted.map { sample -> ChartDataEntry in
                         // Use kg for body mass, meters for height, etc.
-                        let value: Double
+                        var value: Double
                         switch hkId {
                         case .bodyMass: value = sample.quantity.doubleValue(for: .gramUnit(with: .kilo))
                         case .height: value = sample.quantity.doubleValue(for: .meter())
@@ -205,9 +277,9 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
                         case .waistCircumference: value = sample.quantity.doubleValue(for: .meterUnit(with: .centi))
                         default: value = sample.quantity.doubleValue(for: .count())
                         }
-                        let chartEntry = ChartDataEntry(x: sample.endDate.timeIntervalSince1970, y: value)
-                        return chartEntry
+                        return ChartDataEntry(x: sample.endDate.timeIntervalSince1970, y: value)
                     }
+                    
                     if chartEntries.isEmpty {
                         uiView.data = nil
                         uiView.noDataText = "No data"
@@ -218,136 +290,73 @@ struct DGLineChartViewRepresentable: UIViewRepresentable {
                         dataSet.circleRadius = 4
                         dataSet.drawValuesEnabled = false
                         dataSet.lineWidth = 2
-                        dataSet.mode = .horizontalBezier
+                        dataSet.mode = LineChartDataSet.Mode.cubicBezier
+                        
                         let data = LineChartData(dataSet: dataSet)
                         uiView.data = data
                         
-                        // Configure x-axis after data is set
-                        uiView.xAxis.granularity = 24 * 3600  // One day in seconds
-                        uiView.xAxis.labelCount = 8
-                        uiView.xAxis.forceLabelsEnabled = false
+                        // Store all entries in coordinator and update initial axis limits
+                        context.coordinator.allEntries = chartEntries
+                        context.coordinator.updateAxisLimits()
                     }
                 }
             }
-        } else if type.isFormula, let dependencies = type.dependencies?.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }), let formula = type.formula, let moc = type.managedObjectContext {
-            // Gather all entries for dependencies
-            var depEntries: [String: [MeasurementEntry]] = [:]
-            for depName in dependencies {
-                let fetch: NSFetchRequest<MeasurementType> = MeasurementType.fetchRequest()
-                fetch.predicate = NSPredicate(format: "name == %@", depName)
-                if let depType = try? moc.fetch(fetch).first, let entries = depType.entries as? Set<MeasurementEntry> {
-                    depEntries[depName] = entries.sorted { ($0.timestamp ?? Date.distantPast) < ($1.timestamp ?? Date.distantPast) }
-                }
-            }
-            
-            // For each day where we have a measurement, find the most recent values for each dependency
-            var dayToValues: [String: [String: Double]] = [:]
-            var dayToDate: [String: Date] = [:]
-            for (depName, entries) in depEntries {
-                for entry in entries {
-                    if let date = entry.timestamp {
-                        let day = Calendar.current.startOfDay(for: date)
-                        let dayStr = ISO8601DateFormatter().string(from: day)
-                        // For each dependency, find the most recent value up to this day
-                        for (otherDepName, otherEntries) in depEntries {
-                            if otherDepName != depName {
-                                if let mostRecentEntry = otherEntries.last(where: { 
-                                    if let otherDate = $0.timestamp {
-                                        return Calendar.current.startOfDay(for: otherDate) <= day
-                                    }
-                                    return false
-                                }) {
-                                    dayToValues[dayStr, default: [:]][otherDepName] = mostRecentEntry.value
-                                }
-                            }
-                        }
-                        // Add the current entry's value
-                        dayToValues[dayStr, default: [:]][depName] = entry.value
-                        dayToDate[dayStr] = day
-                    }
-                }
-            }
-            
-            let validDays = dayToValues.filter { $0.value.keys.count == dependencies.count }
-            let sortedDays = validDays.keys.sorted()
-            context.coordinator.dates = sortedDays.compactMap { dayToDate[$0] }
-            
-            // Calculate zoom scale based on date range
-            if let firstDate = context.coordinator.dates.first, let lastDate = context.coordinator.dates.last {
-                let months = Calendar.current.dateComponents([.month], from: firstDate, to: lastDate).month ?? 0
-                let maxZoom = Double(max(1, months + 1)) * 3.0
-                uiView.viewPortHandler.setMaximumScaleX(maxZoom)
-            }
-            
-            if let formatter = uiView.xAxis.valueFormatter as? DateAxisValueFormatter {
-                formatter.dates = context.coordinator.dates
-            }
-            let chartEntries: [ChartDataEntry] = sortedDays.map { dayStr in
-                let values = validDays[dayStr]!
-                let expr = NSExpression(format: formula)
-                let result = expr.expressionValue(with: values, context: nil) as? Double ?? 0.0
-                let date = dayToDate[dayStr]!
-                let chartEntry = ChartDataEntry(x: date.timeIntervalSince1970, y: result)
-                return chartEntry
-            }
-            let dataSet = LineChartDataSet(entries: chartEntries, label: type.name ?? "")
-            dataSet.colors = [NSUIColor.systemBlue]
-            dataSet.circleColors = [NSUIColor.systemBlue]
-            dataSet.circleRadius = 4
-            dataSet.drawValuesEnabled = false
-            dataSet.lineWidth = 2
-            dataSet.mode = .horizontalBezier
-            let data = LineChartData(dataSet: dataSet)
-            uiView.data = data
-            
-            // Configure x-axis after data is set
-            uiView.xAxis.granularity = 24 * 3600  // One day in seconds
-            uiView.xAxis.labelCount = 8
-            uiView.xAxis.forceLabelsEnabled = false
         } else {
+            // Fetch all data from the beginning
+            let endDate = Date()
+            let startDate = Calendar.current.date(byAdding: .year, value: -10, to: endDate)! // Fetch up to 10 years of data
+            
             let request: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
-            request.predicate = NSPredicate(format: "type == %@", type)
-            let entries: [MeasurementEntry]
+            request.predicate = NSPredicate(format: "type == %@ AND timestamp >= %@ AND timestamp <= %@", type, startDate as NSDate, endDate as NSDate)
+            request.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: true)]
+            
             do {
-                entries = try self.context.fetch(request)
+                let entries = try self.context.fetch(request)
+                let sorted = entries.sorted { ($0.timestamp ?? Date()) < ($1.timestamp ?? Date()) }
+                let dates = sorted.compactMap { $0.timestamp }
+                
+                // Calculate zoom scale based on date range
+                if let firstDate = dates.first, let lastDate = dates.last {
+                    let months = Calendar.current.dateComponents([.month], from: firstDate, to: lastDate).month ?? 0
+                    let maxZoom = Double(max(1, months + 1)) * 3.0
+                    uiView.viewPortHandler.setMaximumScaleX(maxZoom)
+                }
+                
+                if let formatter = uiView.xAxis.valueFormatter as? DateAxisValueFormatter {
+                    formatter.dates = dates
+                }
+                
+                let chartEntries = sorted.map { entry -> ChartDataEntry in
+                    let chartEntry = ChartDataEntry(x: (entry.timestamp ?? Date()).timeIntervalSince1970, y: entry.value)
+                    if let note = entry.note, !note.isEmpty {
+                        chartEntry.data = note
+                    }
+                    return chartEntry
+                }
+                
+                if chartEntries.isEmpty {
+                    uiView.data = nil
+                    uiView.noDataText = "No data"
+                } else {
+                    let dataSet = LineChartDataSet(entries: chartEntries, label: type.name ?? "")
+                    dataSet.colors = [NSUIColor.systemBlue]
+                    dataSet.circleColors = [NSUIColor.systemBlue]
+                    dataSet.circleRadius = 4
+                    dataSet.drawValuesEnabled = false
+                    dataSet.lineWidth = 2
+                    dataSet.mode = LineChartDataSet.Mode.cubicBezier
+                    
+                    let data = LineChartData(dataSet: dataSet)
+                    uiView.data = data
+                    
+                    // Store all entries in coordinator and update initial axis limits
+                    context.coordinator.allEntries = chartEntries
+                    context.coordinator.updateAxisLimits()
+                }
             } catch {
                 uiView.data = nil
-                return
+                uiView.noDataText = "Error loading data"
             }
-            let sorted = entries.sorted { ($0.timestamp ?? Date()) < ($1.timestamp ?? Date()) }
-            context.coordinator.dates = sorted.compactMap { $0.timestamp }
-            
-            // Calculate zoom scale based on date range
-            if let firstDate = context.coordinator.dates.first, let lastDate = context.coordinator.dates.last {
-                let months = Calendar.current.dateComponents([.month], from: firstDate, to: lastDate).month ?? 0
-                let maxZoom = Double(max(1, months + 1)) * 3.0
-                uiView.viewPortHandler.setMaximumScaleX(maxZoom)
-            }
-            
-            if let formatter = uiView.xAxis.valueFormatter as? DateAxisValueFormatter {
-                formatter.dates = context.coordinator.dates
-            }
-            let chartEntries = sorted.map { entry -> ChartDataEntry in
-                let chartEntry = ChartDataEntry(x: (entry.timestamp ?? Date()).timeIntervalSince1970, y: entry.value)
-                if let note = entry.note, !note.isEmpty {
-                    chartEntry.data = note
-                }
-                return chartEntry
-            }
-            let dataSet = LineChartDataSet(entries: chartEntries, label: type.name ?? "")
-            dataSet.colors = [NSUIColor.systemBlue]
-            dataSet.circleColors = [NSUIColor.systemBlue]
-            dataSet.circleRadius = 4
-            dataSet.drawValuesEnabled = false
-            dataSet.lineWidth = 2
-            dataSet.mode = .horizontalBezier
-            let data = LineChartData(dataSet: dataSet)
-            uiView.data = data
-            
-            // Configure x-axis after data is set
-            uiView.xAxis.granularity = 24 * 3600  // One day in seconds
-            uiView.xAxis.labelCount = 8
-            uiView.xAxis.forceLabelsEnabled = false
         }
     }
 }
@@ -517,40 +526,51 @@ class BalloonMarker: MarkerImage {
 struct PictureGalleryView: View {
     let type: MeasurementType
     @State private var entries: [MeasurementEntry] = []
+    @State private var isLoading: Bool = false
+    @State private var hasMoreData: Bool = true
+    @State private var currentPage: Int = 0
+    private let pageSize: Int = 10
     @Environment(\.managedObjectContext) private var context
     @State private var selectedImage: UIImage? = nil
     @State private var selectedEntry: MeasurementEntry? = nil
     
+    // Track visible entries to manage memory
+    @State private var visibleEntryIds: Set<NSManagedObjectID> = []
+    
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 16) {
+            LazyHStack(spacing: 16) {
                 ForEach(entries.sorted(by: { ($0.timestamp ?? Date()) > ($1.timestamp ?? Date()) }), id: \.self) { entry in
-                    if let imageData = entry.image, let uiImage = UIImage(data: imageData) {
-                        VStack {
-                            Image(uiImage: uiImage)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: 120, height: 120)
-                                .clipped()
-                                .cornerRadius(8)
-                                .onTapGesture {
-                                    selectedImage = uiImage
-                                    selectedEntry = entry
-                                }
-                            if let date = entry.timestamp {
-                                Text(date, style: .date)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                    PictureEntryView(
+                        entry: entry,
+                        isVisible: visibleEntryIds.contains(entry.objectID),
+                        onAppear: {
+                            visibleEntryIds.insert(entry.objectID)
+                            // Load more data when we're near the end
+                            if entry == entries.sorted(by: { ($0.timestamp ?? Date()) > ($1.timestamp ?? Date()) }).last {
+                                loadMoreData()
                             }
+                        },
+                        onDisappear: {
+                            visibleEntryIds.remove(entry.objectID)
+                        },
+                        onTap: {
+                            selectedImage = entry.image.flatMap { UIImage(data: $0) }
+                            selectedEntry = entry
                         }
-                    }
+                    )
+                }
+                
+                if isLoading {
+                    ProgressView()
+                        .frame(width: 120, height: 120)
                 }
             }
             .padding(.horizontal, 16)
         }
-        .onAppear(perform: fetchEntries)
+        .onAppear(perform: fetchInitialEntries)
         .onChange(of: type) { oldValue, newValue in
-            fetchEntries()
+            resetAndFetch()
         }
         .sheet(isPresented: Binding<Bool>(
             get: { selectedImage != nil },
@@ -562,13 +582,99 @@ struct PictureGalleryView: View {
         }
     }
     
-    private func fetchEntries() {
+    private func resetAndFetch() {
+        entries = []
+        currentPage = 0
+        hasMoreData = true
+        visibleEntryIds.removeAll()
+        fetchInitialEntries()
+    }
+    
+    private func fetchInitialEntries() {
+        guard entries.isEmpty else { return }
+        loadMoreData()
+    }
+    
+    private func loadMoreData() {
+        guard !isLoading && hasMoreData else { return }
+        isLoading = true
+        
         let request: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
         request.predicate = NSPredicate(format: "type == %@", type)
+        request.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: false)]
+        request.fetchOffset = currentPage * pageSize
+        request.fetchLimit = pageSize
+        
         do {
-            entries = try context.fetch(request)
+            let newEntries = try context.fetch(request)
+            if newEntries.isEmpty {
+                hasMoreData = false
+            } else {
+                entries.append(contentsOf: newEntries)
+                currentPage += 1
+            }
         } catch {
-            entries = []
+            print("Error fetching entries: \(error)")
+        }
+        
+        isLoading = false
+    }
+}
+
+// Separate view for each picture entry to better manage memory
+struct PictureEntryView: View {
+    let entry: MeasurementEntry
+    let isVisible: Bool
+    let onAppear: () -> Void
+    let onDisappear: () -> Void
+    let onTap: () -> Void
+    
+    // Cache the image only when visible
+    @State private var cachedImage: UIImage? = nil
+    
+    var body: some View {
+        VStack {
+            if isVisible {
+                if let image = cachedImage {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 120, height: 120)
+                        .clipped()
+                        .cornerRadius(8)
+                        .onTapGesture(perform: onTap)
+                } else if let imageData = entry.image {
+                    Image(uiImage: UIImage(data: imageData)!)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 120, height: 120)
+                        .clipped()
+                        .cornerRadius(8)
+                        .onTapGesture(perform: onTap)
+                        .onAppear {
+                            // Cache the image when it becomes visible
+                            cachedImage = UIImage(data: imageData)
+                        }
+                }
+            } else {
+                // Placeholder when not visible
+                Rectangle()
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(width: 120, height: 120)
+                    .cornerRadius(8)
+            }
+            
+            if let date = entry.timestamp {
+                Text(date, style: .date)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .onAppear(perform: onAppear)
+        .onDisappear {
+            onDisappear()
+            // Clear cached image when view disappears
+            cachedImage = nil
         }
     }
 }

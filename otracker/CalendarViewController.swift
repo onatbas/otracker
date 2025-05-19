@@ -114,8 +114,16 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
         measurementsByDate = [:]
         calendarDotsByDate = [:]
         
-        // Fetch Core Data entries for non-HealthKit types
+        // Get the visible month range
+        let visibleMonth = calendar.currentPage
+        let calendar = Calendar.current
+        let range = calendar.range(of: .day, in: .month, for: visibleMonth)!
+        let startDate = calendar.date(from: calendar.dateComponents([.year, .month], from: visibleMonth))!
+        let endDate = calendar.date(byAdding: .day, value: range.count - 1, to: startDate)!
+        
+        // Fetch Core Data entries for non-HealthKit types within the visible month
         let requestEntries: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
+        requestEntries.predicate = NSPredicate(format: "timestamp >= %@ AND timestamp <= %@", startDate as NSDate, endDate as NSDate)
         do {
             let entries = try context.fetch(requestEntries)
             // Group entries by date and type for calendar dots
@@ -156,13 +164,13 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
             print("Error fetching measurements: \(error)")
         }
         
-        // Fetch HealthKit data for linked types
+        // Fetch HealthKit data for linked types within the visible month
         let group = DispatchGroup()
         for type in allMeasurementTypes {
             if let hkIdStr = type.healthKitIdentifier {
                 let hkId = HKQuantityTypeIdentifier(rawValue: hkIdStr)
                 group.enter()
-                HealthKitManager.shared.fetchAllQuantitySamples(for: hkId) { [weak self] samples in
+                HealthKitManager.shared.fetchQuantitySamples(for: hkId, startDate: startDate, endDate: endDate) { [weak self] samples in
                     defer { group.leave() }
                     guard let self = self else { return }
                     DispatchQueue.main.async {
@@ -278,8 +286,26 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
                 formulaResults.append(FormulaResult(type: type, value: result, date: day))
             }
         }
+        
+        // For picture types, fetch only the entries for the selected day
+        let pictureTypes = allTypes.filter { $0.unit == "Picture" }
+        for type in pictureTypes {
+            let request: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
+            request.predicate = NSPredicate(format: "type == %@ AND timestamp >= %@ AND timestamp < %@", 
+                                          type,
+                                          day as NSDate,
+                                          Calendar.current.date(byAdding: .day, value: 1, to: day)! as NSDate)
+            do {
+                let pictureEntries = try context.fetch(request)
+                entries.append(contentsOf: pictureEntries)
+            } catch {
+                print("Error fetching picture entries: \(error)")
+            }
+        }
+        
         // Sort: formula results first, then entries, both by type name
-        selectedMeasurements = formulaResults.sorted { ($0.type.name ?? "") < ($1.type.name ?? "") } + entries.sorted { ($0.type?.name ?? "") < ($1.type?.name ?? "") }
+        selectedMeasurements = formulaResults.sorted { ($0.type.name ?? "") < ($1.type.name ?? "") } + 
+                             entries.sorted { ($0.type?.name ?? "") < ($1.type?.name ?? "") }
         tableView.reloadData()
     }
     
@@ -296,6 +322,11 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
     
     func calendar(_ calendar: FSCalendar, didSelect date: Date, at monthPosition: FSCalendarMonthPosition) {
         updateSelectedMeasurements(for: date)
+    }
+    
+    // Add calendar page change handler
+    func calendarCurrentPageDidChange(_ calendar: FSCalendar) {
+        fetchMeasurements()
     }
     
     // MARK: - UITableViewDataSource/Delegate

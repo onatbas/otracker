@@ -51,11 +51,56 @@ class HealthKitManager {
             completion([])
             return
         }
+        
         let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: true)
-        let query = HKSampleQuery(sampleType: quantityType, predicate: nil, limit: HKObjectQueryNoLimit, sortDescriptors: [sortDescriptor]) { _, samples, _ in
-            let quantitySamples = samples as? [HKQuantitySample] ?? []
-            completion(quantitySamples)
+        let query = HKSampleQuery(sampleType: quantityType,
+                                predicate: nil,
+                                limit: HKObjectQueryNoLimit,
+                                sortDescriptors: [sortDescriptor]) { (query, samples, error) in
+            if let error = error {
+                print("Error fetching HealthKit samples: \(error)")
+                completion([])
+                return
+            }
+            
+            guard let samples = samples as? [HKQuantitySample] else {
+                completion([])
+                return
+            }
+            
+            completion(samples)
         }
+        
+        healthStore.execute(query)
+    }
+    
+    func fetchQuantitySamples(for identifier: HKQuantityTypeIdentifier, startDate: Date, endDate: Date, completion: @escaping ([HKQuantitySample]) -> Void) {
+        guard let quantityType = HKObjectType.quantityType(forIdentifier: identifier) else {
+            completion([])
+            return
+        }
+        
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: true)
+        
+        let query = HKSampleQuery(sampleType: quantityType,
+                                predicate: predicate,
+                                limit: HKObjectQueryNoLimit,
+                                sortDescriptors: [sortDescriptor]) { (query, samples, error) in
+            if let error = error {
+                print("Error fetching HealthKit samples: \(error)")
+                completion([])
+                return
+            }
+            
+            guard let samples = samples as? [HKQuantitySample] else {
+                completion([])
+                return
+            }
+            
+            completion(samples)
+        }
+        
         healthStore.execute(query)
     }
     
