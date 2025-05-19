@@ -2143,6 +2143,7 @@ class ImagePreviewViewController: UIViewController {
     @objc private func shareButtonTapped() {
         guard let image = imageView.image else { return }
         let activityVC = UIActivityViewController(activityItems: [image], applicationActivities: nil)
+        activityVC.excludedActivityTypes = [] // Ensure no activities are excluded
         if let popover = activityVC.popoverPresentationController {
             popover.sourceView = shareButton
             popover.sourceRect = shareButton.bounds
