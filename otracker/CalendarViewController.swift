@@ -287,22 +287,6 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
             }
         }
         
-        // For picture types, fetch only the entries for the selected day
-        let pictureTypes = allTypes.filter { $0.unit == "Picture" }
-        for type in pictureTypes {
-            let request: NSFetchRequest<MeasurementEntry> = MeasurementEntry.fetchRequest()
-            request.predicate = NSPredicate(format: "type == %@ AND timestamp >= %@ AND timestamp < %@", 
-                                          type,
-                                          day as NSDate,
-                                          Calendar.current.date(byAdding: .day, value: 1, to: day)! as NSDate)
-            do {
-                let pictureEntries = try context.fetch(request)
-                entries.append(contentsOf: pictureEntries)
-            } catch {
-                print("Error fetching picture entries: \(error)")
-            }
-        }
-        
         // Sort: formula results first, then entries, both by type name
         selectedMeasurements = formulaResults.sorted { ($0.type.name ?? "") < ($1.type.name ?? "") } + 
                              entries.sorted { ($0.type?.name ?? "") < ($1.type?.name ?? "") }
@@ -341,6 +325,7 @@ class CalendarViewController: UIViewController, FSCalendarDataSource, FSCalendar
         formatter.timeStyle = .short
         var content = cell.defaultContentConfiguration()
         let item = selectedMeasurements[indexPath.row]
+        
         if let formula = item as? FormulaResult {
             content.text = formula.type.name ?? ""
             content.secondaryText = "\(formula.value.formatted) \(formula.type.unit ?? "")"
